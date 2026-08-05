@@ -8,8 +8,10 @@ build:
   cargo build --workspace
 
 # Run all tests
+# Run all tests: nextest for unit + integration, cargo for doctests
 test:
-  cargo test --workspace
+  cargo nextest run --workspace
+  cargo test --workspace --doc
 
 # What CI will run: format check + lints, warnings are errors
 lint:

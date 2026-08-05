@@ -1,0 +1,18 @@
+# Nextest runs every test in its own process. From change 3 on, tests spawn real
+# children and send real signals, so a stuck test must die instead of holding CI.
+
+[profile.default]
+# 30s without finishing means a test is blocked on a child or a signal that never
+# came. terminate-after = 2 kills it after two periods rather than hanging forever.
+slow-timeout = { period = "30s", terminate-after = 2 }
+failure-output = "immediate-final"
+# See every failure in one run, the same reason the Test harness compares
+# status + stdout + stderr before it panics.
+fail-fast = false
+
+[profile.ci]
+slow-timeout = { period = "60s", terminate-after = 2 }
+# Never retry. A retry turns a flaky test green and hides exactly what the
+# 50x flakiness pass (gate G6) exists to catch.
+retries = 0
+final-status-level = "slow"
