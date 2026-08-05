@@ -1,0 +1,17 @@
+[package]
+name = "rune-config"
+version.workspace = true
+edition.workspace = true
+homepage.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+oxc = { workspace = true }
+
+[dev-dependencies]
+rquickjs = { workspace = true }
+insta = { workspace = true }

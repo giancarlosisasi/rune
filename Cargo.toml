@@ -1,0 +1,58 @@
+[workspace]
+members = ["./crates/*"]
+resolver = "3"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+homepage = "https://github.com/giancarlosisasi/rune"
+license = "MIT"
+repository = "https://github.com/giancarlosisasi/rune"
+
+
+[workspace.dependencies]
+clap = {version = "4", features = ["derive"]}
+rustc-hash = "2"
+rquickjs = "0.12"
+oxc = { version = "0.138.0", features = ["semantic", "transformer", "codegen"] }
+insta = "1"
+
+[workspace.lints]
+
+[workspace.lints.clippy]
+# Groups get priority -1 so the specific rules below can override them.
+# https://doc.rust-lang.org/stable/cargo/reference/manifest.html#the-lints-section
+
+# --- pedantic: the whole group, as an error
+pedantic = { level = "deny", priority = -1 }
+# Naming is hard; these nag without adding clarity.
+module_name_repetitions = "allow"
+similar_names = "allow"
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+must_use_candidate = "allow"
+doc_markdown = "allow"
+
+# --- restriction: opt-in prohibitions, picked one by one (never enable the group).
+dbg_macro = "deny"        # no leftover dbg!() in committed code
+todo = "deny"             # no leftover todo!()
+unimplemented = "deny"
+print_stdout = "deny"     # user-facing output must go through rune-out, not raw println!
+print_stderr = "deny"
+allow_attributes = "deny" # prefer #[expect(...)] — it errors when it stops being needed
+clone_on_ref_ptr = "deny" # be explicit: Rc::clone(&x), not x.clone()
+exit = "deny"             # no std::process::exit — return an ExitCode from main instead
+get_unwrap = "deny"       # use indexing or handle the Option, not .get(i).unwrap()
+unused_result_ok = "deny"
+
+[profile.dev]
+# Line tables give readable backtraces; full debug info is slower to build.
+debug = "line-tables-only"
+
+[profile.test]
+debug = "line-tables-only"
+
+[profile.release]
+lto = "fat"
+codegen-units = 1
+strip = "symbols"

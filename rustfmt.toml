@@ -1,0 +1,9 @@
+style_edition = "2024"
+
+tab_spaces = 2
+
+# Same setting rustc's own repo uses: prefer one line whenever it fits max_width.
+use_small_heuristics = "Max"
+
+# Prefer `Point { x, y }` over `Point { x: x, y: y }` when the names match.
+use_field_init_shorthand = true
