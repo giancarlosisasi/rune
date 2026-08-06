@@ -1,0 +1,29 @@
+---
+pageType: home
+title: 'Rune'
+description: 'A script runner for JavaScript and TypeScript monorepos. Define a command once in rune.config.ts and reference it by name from every package.'
+hero:
+  name: Rune
+  text: 'Define a command once. Reference it everywhere.'
+  tagline: 'A script runner for JavaScript and TypeScript monorepos, written in Rust. Commands live in one typed config at the repository root, and every package calls them by name.'
+  actions:
+    - theme: brand
+      text: Get started
+      link: /guide/installation
+    - theme: alt
+      text: Config reference
+      link: /config/
+features:
+  - title: One config, typed
+    details: 'Commands are declared in rune.config.ts with variables, template strings and imports. Editor autocomplete comes from the published types.'
+  - title: Inheritance
+    details: 'A package extends a root script and appends its own flags. It cannot replace the command, so a shared script stays shared.'
+  - title: npm parity
+    details: 'Every script runs through the platform shell with node_modules/.bin on PATH, inherits the terminal, and exits with the child exit code.'
+  - title: Groups
+    details: 'Run scripts one after another or side by side, with prefixed output, kill-on-failure and a success policy.'
+  - title: Warm runs under 5 ms
+    details: 'The resolved config is cached by the content of its whole import graph. A cache hit reads one JSON file.'
+  - title: Six platform binaries
+    details: 'Windows, macOS and Linux on x64 and arm64, installed as optional dependencies with no postinstall step.'
+---

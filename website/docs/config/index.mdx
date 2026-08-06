@@ -1,0 +1,93 @@
+---
+title: 'The config file'
+description: 'Where rune.config.ts lives, how Rune finds it, the shape of its default export, and what a package-level config may add.'
+---
+
+# The config file
+
+Rune reads one file: `rune.config.ts`. It is TypeScript, it default-exports an object with a
+`scripts` map, and it may import other files in the repository.
+
+```ts title="rune.config.ts"
+import { defineConfig } from '@giancarlosio/rune';
+
+export default defineConfig({
+  scripts: {
+    build: { command: 'tsc --build' },
+    test: { command: 'vitest run', description: 'Run unit tests' },
+  },
+});
+```
+
+`defineConfig` is an identity function that supplies the types. A config that exports the object
+literal directly behaves identically and loses editor autocomplete.
+
+## Discovery
+
+Rune walks up from the working directory looking for `rune.config.ts`, and stops at the first
+directory containing a `.git` entry or at the filesystem root.
+
+The boundary matters. Without it, a run from a scratch directory keeps walking and picks up an
+unrelated config from somewhere else on the machine, and the result depends on whose machine it is.
+
+Two directories come out of that walk:
+
+| Name | Definition |
+| --- | --- |
+| Config root | The directory holding the config that was found |
+| Package directory | The nearest ancestor of the working directory containing a `package.json` |
+
+When no config is found:
+
+```
+$ rune list
+error: no rune.config.ts found
+
+searched upward from /tmp/scratch and stopped at the repository boundary.
+
+create one at the root of your repository with:
+
+  rune init
+```
+
+## The default export
+
+The export is an object with one key.
+
+| Key | Type | Required |
+| --- | --- | --- |
+| `scripts` | `Record<string, Script>` | Yes |
+
+Script names are arbitrary strings. `rune list` prints them sorted, so the order in the file has no
+effect on output.
+
+A missing default export, or one that is not an object, is an error naming the file.
+
+## Package-level configs
+
+A package may hold its own `rune.config.ts`. Rune uses the nearest one, and a script defined there
+may extend a root script but never replace it. See
+[Inheritance and overrides](/config/inheritance).
+
+## Sections
+
+<Cards>
+  <Card title="Script types" href="/config/scripts">
+    Every field a script entry accepts, and which combinations are legal.
+  </Card>
+  <Card title="Inheritance and overrides" href="/config/inheritance">
+    extends, appendArgs, and the rule that an override may only sharpen.
+  </Card>
+  <Card title="Environment" href="/config/environment">
+    env, envFile, PATH augmentation, and the precedence between them.
+  </Card>
+  <Card title="Groups" href="/config/groups">
+    serial and parallel members, dependsOn, and the success policy.
+  </Card>
+  <Card title="Timeouts and retries" href="/config/lifecycle">
+    timeout, retries, retryDelay, killSignal and killTimeout.
+  </Card>
+  <Card title="Config evaluation" href="/config/evaluation">
+    What the config file may import and call, and how results are cached.
+  </Card>
+</Cards>

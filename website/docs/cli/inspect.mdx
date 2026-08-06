@@ -1,0 +1,87 @@
+---
+title: 'rune inspect'
+description: 'Print the resolved command, working directory, environment delta and inheritance chain for a script without running it.'
+---
+
+# rune inspect
+
+```
+rune inspect <name> [--root]
+```
+
+Prints exactly what `rune run <name>` would execute, and where every part of it came from. It
+spawns nothing.
+
+```
+$ cd packages/legacy && rune inspect test
+  script      test
+  defined     rune.config.ts:12                    root
+  overridden  packages/legacy/rune.config.ts:4     + --maxWorkers=1
+  command     vitest run --reporter=dot --maxWorkers=1
+  shell       /bin/sh -c
+  cwd         /repo/packages/legacy
+  env         NODE_ENV=test              from .env.test
+              RUNE_SCRIPT_NAME=test
+              RUNE_ROOT=/repo
+              RUNE_PACKAGE_DIR=/repo/packages/legacy
+  ignored     DATABASE_URL               .env.test, already set
+  path        + packages/legacy/node_modules/.bin
+              + node_modules/.bin
+```
+
+## Fields
+
+| Field | Content |
+| --- | --- |
+| `script` | The name asked for |
+| `defined` | The config and line holding the base definition |
+| `overridden` | Each config that extends it, with what it added |
+| `command` | The final string, after inheritance, per-OS selection and argument appending |
+| `shell` | The program and arguments the command is handed to |
+| `cwd` | The resolved working directory |
+| `env` | Every variable Rune adds or changes, with its source |
+| `ignored` | Assignments that did not take effect, and why |
+| `path` | The `.bin` directories prepended, in order |
+
+## Chains
+
+An `extends` chain prints as a line per link, base first:
+
+```
+$ rune inspect test:ci
+  script      test:ci
+  defined     rune.config.ts:8                     root:test
+  extends     rune.config.ts:12                    root:test:coverage  + --coverage
+  extends     rune.config.ts:16                    root:test:ci        + --reporter=junit
+  command     vitest run --reporter=dot --coverage --reporter=junit
+```
+
+## Groups
+
+For a group, the members are listed with the command each resolves to:
+
+```
+$ rune inspect ci
+  script      ci
+  defined     rune.config.ts:22                    root
+  kind        serial, stops at the first failure
+  members     build     tsc --build
+              test      vitest run --reporter=dot
+              lint      biome check .
+```
+
+## Arguments
+
+```bash
+rune inspect test -- --watch
+```
+
+Arguments after `--` are appended and quoted the same way `rune run` would, so the printed command
+is what would run.
+
+`--root` inspects the root definition, ignoring package overrides.
+
+## Exit code
+
+0 when the script resolves. 1 when the name is unknown, with the same suggestion and listing
+`rune run` produces.

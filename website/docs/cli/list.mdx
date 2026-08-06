@@ -1,0 +1,53 @@
+---
+title: 'rune list'
+description: 'Print every script visible from the current directory, with descriptions and override annotations.'
+---
+
+# rune list
+
+```
+rune list
+```
+
+Prints every script the current directory can run, sorted by name, with its description.
+
+```
+$ rune list
+build    Compile every package with tsc
+ci       Build, then test, then lint
+lint     Check formatting and lint rules
+test     Run unit tests
+```
+
+Names are padded to a common width so descriptions align. A script with no `description` prints its
+name alone.
+
+## Provenance
+
+Where a package config is involved, the source of each script is annotated:
+
+```
+$ cd packages/legacy && rune list
+build    Compile every package with tsc
+ci       Build, then test, then lint
+lint     Check formatting and lint rules
+test     Run unit tests                     (overridden here)
+typecheck  Type-check the legacy sources    (defined here)
+```
+
+| Annotation | Meaning |
+| --- | --- |
+| `(overridden here)` | This package extends a root script of the same name |
+| `(defined here)` | This package defines a script the root does not have |
+| none | Comes from the root config unchanged |
+
+## Output stability
+
+The output carries no absolute paths, and the sort order is fixed. Run from the repository root or
+from a package five levels down, and the bytes for a given config are the same. That makes it safe
+to snapshot in a test.
+
+## Exit code
+
+0 when the config loads, whether or not it defines any scripts. 1 when the config cannot be found,
+parsed or validated, with the reason on stderr.

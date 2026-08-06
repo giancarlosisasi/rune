@@ -1,0 +1,124 @@
+---
+title: 'Script types'
+description: 'The four script variants, the fields they share, per-OS command objects, and the validation errors each mistake produces.'
+---
+
+# Script types
+
+A script entry declares exactly one variant. The variant is decided by which of four keys is
+present: `command`, `extends`, `serial` or `parallel`.
+
+```ts
+type PerOsCommand = {
+  default: string;
+  win32?: string;
+  darwin?: string;
+  linux?: string;
+};
+
+type ScriptBase = {
+  description?: string;
+  cwd?: string;
+  env?: Record<string, string>;
+  envFile?: string;
+};
+
+type Lifecycle = {
+  timeout?: number;
+  retries?: number;
+  retryDelay?: number | 'exponential';
+  killSignal?: string;
+  killTimeout?: number;
+  interactive?: boolean;
+};
+
+export type Script =
+  | (ScriptBase & Lifecycle & { command: string | PerOsCommand; dependsOn?: string[] })
+  | (ScriptBase & Lifecycle & { extends: string; appendArgs?: string[]; dependsOn?: string[] })
+  | (ScriptBase & { serial: string[]; continueOnError?: boolean })
+  | (ScriptBase & { parallel: string[]; continueOnError?: boolean; successPolicy?: SuccessPolicy });
+```
+
+The same rules are enforced twice: by these types when the config is written, and by Rune when it
+is loaded. A fixture test asserts that anything `tsc` accepts, Rune accepts.
+
+## Shared fields
+
+Every variant accepts these.
+
+| Field | Type | Default | Meaning |
+| --- | --- | --- | --- |
+| `description` | `string` | none | Shown by `rune list` |
+| `cwd` | `string` | the package directory | Where the script runs. A relative value resolves against the package directory; an absolute value is used as written |
+| `env` | `Record<string, string>` | `{}` | Variables applied last, so they win over everything inherited |
+| `envFile` | `string` | none | A dotenv file whose assignments fill gaps in the environment |
+
+## The command variant
+
+```ts
+test: {
+  command: 'vitest run --coverage',
+  description: 'Run unit tests',
+}
+```
+
+`command` is handed to a shell, so operators work: `tsc --build && node dist/main.js`,
+`jest | tee test.log`, `cross-env NODE_ENV=test vitest`. Rune parses none of it. The shell is
+`cmd.exe` on Windows and `/bin/sh` elsewhere, or whatever `npm_config_script_shell` names.
+
+### Per-OS commands
+
+Where one command cannot serve every platform, `command` takes an object. `default` is required
+and is used for any platform without its own entry.
+
+```ts
+clean: {
+  command: {
+    default: 'rm -rf dist',
+    win32: 'if exist dist rmdir /s /q dist',
+  },
+}
+```
+
+Selection happens at resolution time, from the platform Rune is running on. `rune inspect` prints
+the selected string, not the object.
+
+## The extends variant
+
+```ts
+test: {
+  extends: 'test',
+  appendArgs: ['--maxWorkers=1'],
+}
+```
+
+Resolves another script's command and appends arguments to it. Chains are followed transitively and
+cycles are rejected by name. See [Inheritance and overrides](/config/inheritance).
+
+## The group variants
+
+```ts
+ci: { serial: ['build', 'test', 'lint'] },
+dev: { parallel: ['dev:api', 'dev:web'] },
+```
+
+Members are script names. A group carries no `command` and no lifecycle options; those belong on
+the members. See [Groups](/config/groups).
+
+## Validation
+
+Every rejection names the script it came from, because a config with thirty entries makes a message
+about "the shape" useless.
+
+| Mistake | Message |
+| --- | --- |
+| No variant key | ``script `empty` has no command`` followed by the legal keys |
+| Two variant keys | ``script `test` sets both `command` and `extends` — a script may only be one kind`` |
+| Misspelled field | ``script `test` has an unknown field `comand``` followed by what is allowed there |
+| Entry is not an object | ``script `dev` must be an object; found a string`` |
+| No `scripts` key | ``the config must be an object with a `scripts` object; found an array`` |
+
+An unknown field is an error rather than a warning. Silent acceptance of `retires` instead of
+`retries` means the option never takes effect and nothing says so.
+
+Diagnostics go to stderr on every platform. Standard output belongs to the script.

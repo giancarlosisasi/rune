@@ -1,0 +1,122 @@
+---
+title: 'Environment'
+description: 'The four layers Rune builds a child environment from, the envFile rule that files never override the machine, and the reserved RUNE_ prefix.'
+---
+
+# Environment
+
+The environment a script sees is built in four layers. Later layers win.
+
+| Layer | Source | Overrides |
+| --- | --- | --- |
+| 1 | The parent process environment | Nothing. It is the base |
+| 2 | `envFile` assignments | Nothing that is already set |
+| 3 | The script's `env` map | Layers 1 and 2, except reserved names |
+| 4 | `RUNE_SCRIPT_NAME`, `RUNE_ROOT`, `RUNE_PACKAGE_DIR` | Everything |
+
+`PATH` is rebuilt between layers 1 and 2, described below.
+
+## env
+
+A map of literal values, applied last.
+
+```ts
+build: {
+  command: 'vite build',
+  env: { NODE_ENV: 'production' },
+}
+```
+
+An `env` entry wins over the machine's value for the same variable. That is the difference between
+`env` and `envFile`: `env` is a decision made in the config, so it takes effect.
+
+## envFile
+
+A dotenv file, read relative to the config that declared it.
+
+```ts
+test: {
+  command: 'vitest run',
+  envFile: '.env.test',
+}
+```
+
+**A file never overrides a variable that is already set.** An assignment whose variable exists in
+the environment is skipped, and the skip is reported on stderr with the variable, the file and the
+reason:
+
+```
+warning: DATABASE_URL in .env.test was ignored — already set in the environment
+```
+
+This makes a one-off override work the way it looks like it should:
+
+```bash
+DATABASE_URL=postgres://localhost/scratch pnpm test
+```
+
+Without the rule, the file would silently win and the command above would do nothing.
+
+A missing `envFile` is an error, not a warning. A test suite that runs against the wrong database
+because a file was renamed is worse than a failed run.
+
+## The RUNE_ prefix
+
+Names beginning with `RUNE_` are reserved. An attempt to set one from a file or from an `env` map is
+ignored and reported:
+
+```
+warning: RUNE_ROOT in the env map was ignored — RUNE_ is reserved
+```
+
+Rune sets three of them for every script:
+
+| Variable | Value |
+| --- | --- |
+| `RUNE_SCRIPT_NAME` | The name passed to `rune run` |
+| `RUNE_ROOT` | The directory holding the config that defined the script |
+| `RUNE_PACKAGE_DIR` | The package directory the run started from |
+
+## PATH
+
+Rune prepends every `node_modules/.bin` directory from the package directory up to the config root,
+most specific first, using the platform separator.
+
+For a run in `packages/api` of a repository rooted at `/repo`:
+
+```
+/repo/packages/api/node_modules/.bin
+/repo/node_modules/.bin
+<the inherited PATH>
+```
+
+Order decides which copy of a tool wins. A package that pinned an older version of a tool gets its
+own copy, not the root's. Directories that do not exist are still added, matching npm, so a
+directory created later lands in the right position without a re-run.
+
+This is what makes `"command": "vitest run"` work with no path and no `npx`.
+
+## Windows
+
+Environment variable names are case-insensitive on Windows and the operating system enforces that,
+not the caller. Rune merges case-insensitively there, so a child never receives both `PATH` and
+`Path`. The name is preserved as the parent wrote it, so a machine that says `Path` hands the child
+`Path`.
+
+## Seeing the result
+
+`rune inspect` prints the delta against the current environment, including the assignments that
+were ignored.
+
+```
+$ rune inspect test
+  command     vitest run
+  cwd         /repo/packages/api
+  env         NODE_ENV=test              from .env.test
+              RUNE_SCRIPT_NAME=test
+              RUNE_ROOT=/repo
+              RUNE_PACKAGE_DIR=/repo/packages/api
+  ignored     DATABASE_URL               .env.test, already set
+  path        + packages/api/node_modules/.bin
+              + node_modules/.bin
+```

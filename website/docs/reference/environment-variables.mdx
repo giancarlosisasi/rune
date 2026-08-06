@@ -1,0 +1,72 @@
+---
+title: 'Environment variables'
+description: 'The variables Rune sets for every script, the ones it reads, and the reserved RUNE_ prefix.'
+---
+
+# Environment variables
+
+## Set for every script
+
+Rune sets these after every other layer, so they are always the values below.
+
+| Variable | Value |
+| --- | --- |
+| `RUNE_SCRIPT_NAME` | The name passed to `rune run` |
+| `RUNE_ROOT` | The directory holding the config that defined the script |
+| `RUNE_PACKAGE_DIR` | The package directory the run started from |
+
+A script uses them to find repository-relative paths without hard-coding `../..`:
+
+```ts
+build: {
+  command: 'node "$RUNE_ROOT/scripts/build.mjs"',
+}
+```
+
+## Read by Rune
+
+| Variable | Effect |
+| --- | --- |
+| `npm_config_script_shell` | The shell every command is spawned through. Arrives automatically when Rune runs from a package-manager script |
+| `PATH` | The base that `node_modules/.bin` directories are prepended to |
+| `CI` | Decides `rune.isCI` in a config. Any value other than empty, `0` or `false` counts as CI |
+| `NO_COLOR` | Any value turns off colour in Rune's own output |
+| `FORCE_COLOR` | Forwarded to piped members of a parallel group, so their colour survives the pipe |
+| `RUNE_LOG` | Turns on Rune's internal tracing. `RUNE_LOG=debug` is the useful level |
+| `RUNE_BINARY_PATH` | Points the npm wrapper at a specific native binary instead of resolving one |
+
+## Read by a config
+
+A config sees the process environment through `rune.env`, and every read is recorded so it enters
+the cache key.
+
+```ts
+const registry = rune.env.NPM_REGISTRY ?? 'https://registry.npmjs.org';
+```
+
+A variable the config read invalidates the cache when it changes. A variable it never read has no
+effect on caching.
+
+## The reserved prefix
+
+Names beginning with `RUNE_` cannot be set from an `envFile` or from a script's `env` map. An
+attempt is ignored and reported:
+
+```
+warning: RUNE_ROOT in the env map was ignored — RUNE_ is reserved
+```
+
+The reason is that a script reading `RUNE_ROOT` has to be able to trust it. A config that could
+overwrite it would make the value mean something different per script.
+
+## RUNE_BINARY_PATH
+
+The npm wrapper resolves a platform package and spawns the binary inside it. `RUNE_BINARY_PATH`
+replaces that resolution:
+
+```bash
+RUNE_BINARY_PATH=./target/release/rune pnpm test
+```
+
+When the path is set and the file does not exist, the wrapper fails immediately rather than falling
+back, so a typo does not silently run the published binary instead of the local build.

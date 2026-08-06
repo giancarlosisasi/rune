@@ -1,0 +1,56 @@
+---
+title: 'Commands'
+description: 'The five Rune commands, the global flags, and where diagnostics are written.'
+---
+
+# Commands
+
+```
+rune <command> [options]
+
+Commands:
+  run <name> [-- args...]   Run a script by name
+  list                      List all available scripts
+  inspect <name>            Show how a script resolves and where it comes from
+  init                      Write a starter config
+  cache clear               Remove every cached config result
+
+Options:
+  -h, --help                Print help
+  -V, --version             Print version
+```
+
+<Cards>
+  <Card title="rune run" href="/cli/run">
+    Execute a script, pass arguments through, and propagate its exit code.
+  </Card>
+  <Card title="rune list" href="/cli/list">
+    Every script visible from here, with descriptions and provenance.
+  </Card>
+  <Card title="rune inspect" href="/cli/inspect">
+    The resolved command, environment and chain, without spawning anything.
+  </Card>
+  <Card title="rune init" href="/cli/init">
+    Write a starter config, optionally seeded from package.json.
+  </Card>
+  <Card title="rune cache" href="/cli/cache">
+    Remove the resolved-config cache.
+  </Card>
+</Cards>
+
+## Streams
+
+Standard output belongs to the script. Every Rune diagnostic, warning and echo goes to standard
+error, on every platform, so `rune run build > artifact.txt` captures the build's bytes and nothing
+of Rune's.
+
+## Colour
+
+Colour is used when standard error is a terminal that supports it. `NO_COLOR` set to any value
+turns it off. Rune never relies on colour alone: every state carries a glyph and a word as well.
+
+## Environment variables
+
+Every flag has a matching `RUNE_` environment variable, so a setting can live in a shell profile or
+a CI job definition instead of on the command line. See
+[Environment variables](/reference/environment-variables).

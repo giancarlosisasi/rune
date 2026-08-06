@@ -1,0 +1,81 @@
+---
+title: 'Exit codes'
+description: 'What Rune exits with for every outcome: child codes, signal deaths, group failures, timeouts and Rune own errors.'
+---
+
+# Exit codes
+
+Rune propagates the child's exact exit code. Tools speak through codes, and a runner that collapses
+them to 0 and 1 destroys the only signal a CI job has.
+
+## The table
+
+| Situation | Rune exits with |
+| --- | --- |
+| Child exits with code N | N, exactly |
+| Child dies from signal S on POSIX | `128 + S`. `SIGINT` gives 130, `SIGTERM` gives 143 |
+| Child handles Ctrl+C and exits 0 | 0 |
+| Windows child killed by Ctrl+C | The raw status, commonly `3221225786` (`0xC000013A`) |
+| Serial group or `dependsOn` failure | The stopping failure's code. Later members do not start |
+| Parallel group failure | The first failing member's code, in chronological exit order |
+| Parallel group rescued by `successPolicy` | 0 |
+| `timeout` expires | 124, after the process tree is terminated |
+| Rune's own error: no config, unknown script, invalid config | 1 |
+
+## Ctrl+C
+
+The interrupt reaches every process attached to the terminal, including Rune and the child. Rune
+records the signal and keeps waiting. It never exits before the child does.
+
+What Rune reports is therefore the child's own outcome:
+
+| The child | Rune exits with |
+| --- | --- |
+| Handles `SIGINT`, cleans up, exits 0 | 0 |
+| Handles `SIGINT`, exits 1 | 1 |
+| Does not handle it and dies from the signal | 130 |
+
+This matches `npm run`. A build script that catches the interrupt and finishes writing its output
+is a success, and treating it as a failure would be wrong.
+
+## Two collisions worth knowing
+
+**Rune's own errors exit 1, and so do many children.** A config error and a failing test suite are
+indistinguishable by code alone. The distinguishing signal is stderr: Rune's own failures always
+write a diagnostic there and produce no output on stdout. npm and `just` accept the same collision.
+
+**The timeout code is 124, matching GNU `timeout`.** A child that exits 124 on its own is
+indistinguishable by code. Rune prints the reason to stderr when it is the one that decided:
+
+```
+error: `e2e` exceeded its 600000 ms timeout — process tree terminated
+```
+
+## Wide statuses on Windows
+
+A Windows exit status uses all 32 bits, and Ctrl+C reports `0xC000013A`. Rune passes it through
+unchanged rather than truncating it to a byte. Truncation would turn "the user pressed Ctrl+C" into
+"the script failed with 58", which a CI job would then act on.
+
+## Signal deaths on POSIX
+
+`128 + n` is the shell convention, and it is what `$?` shows after a signal death.
+
+| Signal | n | Code |
+| --- | --- | --- |
+| `SIGINT` | 2 | 130 |
+| `SIGQUIT` | 3 | 131 |
+| `SIGKILL` | 9 | 137 |
+| `SIGTERM` | 15 | 143 |
+
+Windows has no POSIX signals, and an exit status there carries none.
+
+## Checking in CI
+
+```bash
+rune run test
+# the runner reads $? and it is vitest's own code
+```
+
+Nothing needs unwrapping. A job that branched on `npm run test`'s code branches on the same values
+after the switch to Rune.

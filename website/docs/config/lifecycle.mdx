@@ -1,0 +1,101 @@
+---
+title: 'Timeouts and retries'
+description: 'timeout, retries, retryDelay, killSignal and killTimeout on command and extends scripts, and how they combine.'
+---
+
+# Timeouts and retries
+
+Five options control how long a script may run and what happens when it fails. They belong on
+`command` and `extends` scripts, single or grouped. A group entry that declares one is a validation
+error.
+
+| Option | Type | Default | Meaning |
+| --- | --- | --- | --- |
+| `timeout` | `number` | none | Milliseconds before the process tree is terminated |
+| `retries` | `number` | `0` | Extra attempts after a failure |
+| `retryDelay` | `number \| 'exponential'` | `0` | Milliseconds between attempts, or `2^attempt` seconds |
+| `killSignal` | `string` | `'SIGTERM'` | The signal sent first when Rune terminates the script |
+| `killTimeout` | `number` | `5000` | Milliseconds before escalating to `SIGKILL` |
+
+## timeout
+
+```ts
+'e2e': {
+  command: 'playwright test',
+  timeout: 600000,
+}
+```
+
+When the budget elapses, Rune terminates the script's whole process tree through the same
+escalation path a group uses: `killSignal`, then `SIGKILL` after `killTimeout`. On Windows the
+job object is terminated, which takes the tree with it.
+
+Rune then exits **124**, matching GNU `timeout`, and prints the reason:
+
+```
+error: `e2e` exceeded its 600000 ms timeout — process tree terminated
+```
+
+A script that finishes inside its budget is unaffected. No early termination, no altered code.
+
+## retries
+
+```ts
+'test:flaky': {
+  command: 'vitest run tests/network',
+  retries: 2,
+  retryDelay: 'exponential',
+}
+```
+
+Retries happen only on failure. A script that exits 0 runs once.
+
+With `retryDelay: 'exponential'` the wait is `2^attempt` seconds: 2 s before the second attempt,
+4 s before the third. A number is a fixed wait in milliseconds.
+
+Anything observing the script sees only the final attempt: the reported exit code, a group's
+failure handling, and a success policy. A script that fails twice and then succeeds is one success,
+not three events.
+
+## timeout with retries
+
+Each attempt gets a fresh timeout budget. A timed-out attempt counts as a retryable failure, and
+the timeout exit code surfaces only when the final attempt times out.
+
+```ts
+'deploy:smoke': {
+  command: 'node scripts/smoke.mjs',
+  timeout: 30000,
+  retries: 3,
+}
+```
+
+Four attempts of up to 30 seconds each, not 30 seconds in total.
+
+## killSignal and killTimeout
+
+These describe how Rune terminates a script it decided to stop, whether from a timeout, a failing
+sibling in a parallel group, or a group teardown.
+
+```ts
+'dev:api': {
+  command: 'node --watch server.js',
+  killSignal: 'SIGINT',
+  killTimeout: 2000,
+}
+```
+
+A server that cleans up on `SIGINT` gets the chance to. If it has not exited after `killTimeout`,
+Rune sends `SIGKILL`.
+
+Setting `killSignal: 'SIGKILL'` skips the timer, because there is nothing to escalate to. A process
+that had already exited is never an error.
+
+On Windows there are no POSIX signals. `killSignal` selects between a polite console event and
+terminating the job object, and `killTimeout` is the interval between them.
+
+## What these do not cover
+
+Ctrl+C from the terminal is not a Rune-initiated termination. The interrupt reaches the child
+directly and Rune waits for it, so `killSignal` and `killTimeout` play no part. See
+[Exit codes](/reference/exit-codes).

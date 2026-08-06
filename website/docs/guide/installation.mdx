@@ -1,0 +1,86 @@
+---
+title: 'Installation'
+description: 'Install the Rune CLI with npm, pnpm, yarn or bun, create the first rune.config.ts, and verify the binary.'
+---
+
+# Installation
+
+Rune installs as a development dependency at the root of the repository. The package resolves one
+native binary for the current platform through optional dependencies, so nothing is compiled and
+no postinstall script runs.
+
+```bash
+pnpm add -D @giancarlosio/rune
+```
+
+```bash
+npm install --save-dev @giancarlosio/rune
+```
+
+```bash
+yarn add -D @giancarlosio/rune
+```
+
+```bash
+bun add -d @giancarlosio/rune
+```
+
+Install it once, at the workspace root. Packages call the binary through `node_modules/.bin`,
+which every package manager links for the whole workspace.
+
+## Verifying the install
+
+```bash
+pnpm rune --version
+```
+
+The version printed here is the version of the native binary, not the wrapper package. They are
+released together and always match.
+
+## The first config
+
+`rune init` writes a starter config next to the nearest `package.json`, with the fields commented.
+It refuses to overwrite an existing file.
+
+```bash
+pnpm rune init
+```
+
+The result:
+
+```ts title="rune.config.ts"
+import { defineConfig } from '@giancarlosio/rune';
+
+export default defineConfig({
+  scripts: {
+    build: {
+      command: 'tsc --build',
+      description: 'Compile every package',
+    },
+  },
+});
+```
+
+Put this file at the repository root. Rune finds it by walking up from wherever it is invoked, so
+a run from `packages/api/src` uses the same config as a run from the root.
+
+## Node version
+
+The wrapper is written in conservative JavaScript and declares no `engines` field, so it installs
+on any Node version. Node 20.19 and later is the tested floor.
+
+## Platforms
+
+| Platform | Architecture |
+| --- | --- |
+| Windows | x64, and arm64 through emulation |
+| macOS | x64, arm64 |
+| Linux | x64, arm64, statically linked against musl |
+
+One static Linux binary per architecture runs on every distribution, glibc and musl alike. The
+full table is on [Platforms](/reference/platforms).
+
+## Next
+
+[Your first script](/guide/first-script) runs a command from a nested package and shows what Rune
+does to the environment before spawning it.

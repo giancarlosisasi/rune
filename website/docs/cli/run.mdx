@@ -1,0 +1,100 @@
+---
+title: 'rune run'
+description: 'Execute a script by name, pass arguments after --, and propagate the child exit code exactly.'
+---
+
+# rune run
+
+```
+rune run <name> [--root] [-- args...]
+```
+
+Resolves `name` against the nearest config, spawns it through the platform shell, waits, and exits
+with the child's code.
+
+| Argument | Meaning |
+| --- | --- |
+| `<name>` | The script name. Required |
+| `--root` | Resolve against the root config, ignoring any package override |
+| `-- args...` | Everything after `--` is appended to the resolved command |
+
+## Arguments after --
+
+```bash
+rune run test -- --watch --reporter=verbatim
+```
+
+Each element is quoted for the shell that will receive it, so an argument containing a space
+arrives as one argument. This matches `npm run test -- --watch`, and the parity is covered by a
+test suite that compares the two byte for byte.
+
+## The terminal
+
+A single script inherits Rune's standard input, output and error. The child holds the real
+terminal, so colour detection, progress bars, watch-mode redraws and interactive prompts behave as
+they would without Rune in front of them. Rune copies no bytes.
+
+Parallel groups are the exception. Their members are piped so their output can be prefixed. See
+[Prefixed output](/reference/output).
+
+## Ctrl+C
+
+The interrupt reaches the child directly, because the child shares Rune's process group on POSIX
+and the console on Windows. Rune records the signal and keeps waiting. It never exits before the
+child.
+
+The child's own outcome is what Rune reports. A watcher that handles `SIGINT` and exits 0 makes
+Rune exit 0. A process killed by the signal makes Rune exit 130.
+
+## Exit codes
+
+```bash
+rune run test; echo $?
+```
+
+The child's code, exactly. Tools speak through exit codes and Rune does not translate them. The
+full table is on [Exit codes](/reference/exit-codes).
+
+## When the script does not exist
+
+```
+$ rune run biuld
+error: no script named `biuld`
+
+did you mean `build`?
+
+scripts defined here:
+  build
+  lint
+  test
+```
+
+The suggestion appears when a defined name is within a Levenshtein distance of 2. The full list is
+printed either way, because a suggestion alone hides the config from someone seeing it for the
+first time.
+
+## When there is no config
+
+```
+$ rune run test
+error: no rune.config.ts found
+
+searched upward from /tmp/scratch and stopped at the repository boundary.
+
+create one at the root of your repository with:
+
+  rune init
+```
+
+## The shell
+
+| Platform | Shell | Invocation |
+| --- | --- | --- |
+| Windows | `cmd.exe` | `cmd /d /s /c "<command>"`, arguments passed verbatim |
+| macOS, Linux | `/bin/sh` | `sh -c "<command>"` |
+
+`npm_config_script_shell` overrides both, and it arrives in the environment automatically when Rune
+is called from a package-manager script. A PowerShell value is invoked with `-NoProfile -Command`.
+
+Going through a shell is what makes `&&`, pipes and redirection work without Rune parsing any of
+it, and it is what npm does, so a command string that worked in `package.json` keeps working.

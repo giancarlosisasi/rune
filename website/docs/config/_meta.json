@@ -1,0 +1,9 @@
+[
+  { "type": "file", "name": "index", "label": "The config file" },
+  "scripts",
+  "inheritance",
+  "environment",
+  "groups",
+  "lifecycle",
+  "evaluation"
+]

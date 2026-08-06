@@ -1,0 +1,148 @@
+---
+title: 'Config evaluation'
+description: 'What a rune.config.ts may import and call, the frozen rune global, and how the resolved result is cached by import-graph content.'
+---
+
+# Config evaluation
+
+The config is TypeScript, evaluated by an engine embedded in the Rune binary. There is no Node
+process, no `tsc`, and no toolchain to install. A cold evaluation is a few milliseconds and a warm
+run reads one cached JSON file.
+
+## What works
+
+TypeScript syntax is erased before evaluation. Annotations, interfaces and type aliases have no
+runtime effect, and constructs that do carry runtime meaning keep it.
+
+```ts title="rune.config.ts"
+import { defineConfig } from '@giancarlosio/rune';
+import { PACKAGES } from './scripts/packages';
+
+const enum Reporter {
+  Dot = 'dot',
+  Junit = 'junit',
+}
+
+const reporter = rune.isCI ? Reporter.Junit : Reporter.Dot;
+const threads = rune.env.CPU_COUNT ?? '4';
+
+export default defineConfig({
+  scripts: {
+    test: { command: `vitest run --reporter=${reporter} --maxWorkers=${threads}` },
+    ...Object.fromEntries(
+      PACKAGES.map((name) => [`build:${name}`, { command: `tsc --build packages/${name}` }]),
+    ),
+  },
+});
+```
+
+Variables, template strings, spread, `Object.fromEntries`, functions, `enum` members and relative
+imports all behave as expected.
+
+## Relative imports
+
+A config may import other files in the repository with `./` and `../` specifiers. Each imported
+file goes through the same pipeline, recursively.
+
+```ts
+import { PACKAGES } from './scripts/packages';   // resolves scripts/packages.ts
+import { flags } from './scripts/flags.ts';      // explicit extension
+import shared from './shared';                   // shared/index.ts
+```
+
+Forward slashes and platform separators resolve to the same file, so a Windows and a Linux machine
+produce the same result and share one cache entry.
+
+## The rune global
+
+Configs get one ambient object, frozen.
+
+| Property | Type | Value |
+| --- | --- | --- |
+| `rune.env` | `Record<string, string \| undefined>` | Read access to the process environment |
+| `rune.platform` | `'win32' \| 'darwin' \| 'linux'` | The running operating system, named as Node names it |
+| `rune.isCI` | `boolean` | `CI` is set to anything other than empty, `0` or `false` |
+
+Reads are recorded. A variable the config actually read enters the cache key; an unrelated variable
+changing does not throw away a valid entry.
+
+Assignment to `rune` throws. The object is frozen, and `env` is a proxy that rejects writes, so a
+config cannot change what Rune resolves with by mutating the global.
+
+## What does not work
+
+The engine is not Node. Reaching for a Node global or module produces a message that lists what is
+available:
+
+```
+error: `fs` is not available in a rune config.
+
+rune evaluates this file with an embedded JavaScript engine, not Node.js,
+so Node globals and modules do not exist here.
+
+what does work:
+  - `rune.env`, `rune.platform`, `rune.isCI`
+  - relative imports of other files in this repository, such as `./scripts/helpers.ts`
+  - `import type` from any npm package — type-only imports are erased before evaluation
+```
+
+| Not available | Note |
+| --- | --- |
+| `require`, `process`, `module`, `exports`, `Buffer`, `global`, `__dirname`, `__filename` | Node globals |
+| `fs`, `path`, `os`, `url`, `util`, `child_process`, `crypto` | Node modules |
+| Runtime imports from npm packages | The specifier is named in the error |
+| Dynamic `import()` | Rejected, see below |
+
+Type-only imports from npm packages are fine, because they are erased before anything runs:
+
+```ts
+import type { Script } from '@giancarlosio/rune';
+```
+
+Dynamic `import()` is rejected for cache integrity. A computed specifier cannot be found by the
+static import walk, so it would escape the hashed import graph and serve a stale result.
+
+## Errors
+
+A config that throws reports the file and a line in the TypeScript the user wrote, not in the
+JavaScript the engine ran. Type stripping reprints the file, so the two line numbers differ. Rune
+builds a source map on the failure path and remaps the frame, which costs nothing on the runs that
+succeed.
+
+A syntax error names the file and points at the span. A missing relative import names both the
+missing file and the file that imported it.
+
+## Caching
+
+The resolved config is stored at `node_modules/.cache/rune/` under a key made from:
+
+- the entry file's bytes
+- the bytes of every transitively imported relative file
+- the Rune binary version
+- the platform
+- the environment values the config read
+
+The cache is content addressed. There is no expiry and no timestamp comparison, so restoring a file
+to its original bytes reuses the original entry.
+
+Every cache failure degrades to full evaluation with nothing on stderr. An unreadable entry is a
+miss. An unwritable cache directory is a miss that still exits 0. A caching layer that can break a
+build is worse than no caching layer.
+
+Clear it with:
+
+```bash
+rune cache clear
+```
+
+## Budget
+
+| Stage | Target |
+| --- | --- |
+| Binary startup | under 3 ms |
+| Warm config, cache hit | under 2 ms |
+| Cold config, strip and evaluate | under 30 ms |
+| Spawn overhead for a single script | close to zero |
+| Total, warm | under 5 ms |
+
+A benchmark in CI fails the build when the warm total regresses.

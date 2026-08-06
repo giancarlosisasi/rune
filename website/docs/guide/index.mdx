@@ -1,0 +1,46 @@
+---
+title: 'Overview'
+description: 'What Rune is, the four pieces it is made of, and where to start reading.'
+---
+
+# Overview
+
+Rune is a script runner for JavaScript and TypeScript monorepos. Commands are declared once in
+a `rune.config.ts` at the repository root. Each package's `package.json` references a command by
+name, so changing a flag is one edit at the root instead of one edit per package.
+
+Rune is a script registry and a runner. It does not build a task graph, cache task results, or
+order tasks by dependency. Turborepo and Nx keep doing that, and they call `rune run …`
+underneath.
+
+## The four pieces
+
+| Piece | What it does |
+| --- | --- |
+| `rune.config.ts` | Declares every script. TypeScript, evaluated by an embedded engine |
+| The resolver | Picks the right definition for the package you are in, applies inheritance, layers the environment |
+| The runner | Spawns the command through the platform shell, hands it the terminal, and reports its exit code |
+| The cache | Stores the resolved config keyed by the content of its whole import graph |
+
+## Reading order
+
+<Cards>
+  <Card title="Installation" href="/guide/installation">
+    Add Rune to a repository and write the first config.
+  </Card>
+  <Card title="Your first script" href="/guide/first-script">
+    One command, run from a package five directories down.
+  </Card>
+  <Card title="Adopting Rune in a monorepo" href="/guide/monorepo-adoption">
+    Move existing package.json scripts into one config, package by package.
+  </Card>
+  <Card title="Turborepo and Nx" href="/guide/task-runners">
+    The one configuration change a task runner needs when Rune arrives.
+  </Card>
+</Cards>
+
+## Reference
+
+The [config reference](/config/) covers every field a script entry accepts. The
+[CLI reference](/cli/) covers every command and flag. [Exit codes](/reference/exit-codes) is the
+page to read before wiring Rune into CI.

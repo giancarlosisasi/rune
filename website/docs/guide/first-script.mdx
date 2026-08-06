@@ -1,0 +1,101 @@
+---
+title: 'Your first script'
+description: 'Define a command in rune.config.ts, call it from a package, and see what Rune changes about PATH, the working directory and the exit code.'
+---
+
+# Your first script
+
+This walks through one script, from definition to exit code.
+
+## 1. Declare the command
+
+```ts title="rune.config.ts"
+import { defineConfig } from '@giancarlosio/rune';
+
+export default defineConfig({
+  scripts: {
+    test: {
+      command: 'vitest run --coverage --reporter=dot',
+      description: 'Run unit tests',
+    },
+  },
+});
+```
+
+`command` is the string a shell receives. Pipes, `&&`, redirection and quoting work exactly as
+they do in a `package.json` script, because the string reaches the same shell.
+
+## 2. Reference it from a package
+
+```json title="packages/api/package.json"
+{
+  "name": "@acme/api",
+  "scripts": {
+    "test": "rune run test"
+  }
+}
+```
+
+This line is the last edit that file needs for this script. Flags change at the root from now on.
+
+## 3. Run it
+
+```bash
+cd packages/api
+pnpm test
+```
+
+Rune walks up from `packages/api` looking for `rune.config.ts`, stopping at the first directory
+containing `.git`. It records two directories from that walk:
+
+| Name | Value here | Used for |
+| --- | --- | --- |
+| Config root | the repository root | Where `RUNE_ROOT` points, and the top of the `PATH` walk |
+| Package directory | `packages/api` | The default working directory, and the deepest `.bin` on `PATH` |
+
+## What the child process receives
+
+Before spawning, Rune builds the child's environment in four layers. Later layers win.
+
+1. The parent environment, unchanged.
+2. `PATH`, with every `node_modules/.bin` from the package directory up to the config root
+   prepended, most specific first. This is what makes the bare name `vitest` resolve.
+3. `RUNE_SCRIPT_NAME`, `RUNE_ROOT` and `RUNE_PACKAGE_DIR`.
+4. The script's own `env` map.
+
+The child then inherits Rune's standard input, output and error untouched. Colour, progress bars,
+watch mode and interactive prompts behave as they do without Rune in front of them.
+
+## The exit code
+
+Rune exits with the child's exact code. A test run that fails with 1 exits 1, a `tsc` run that
+fails with 2 exits 2, and a POSIX process killed by signal `n` reports `128 + n`. The full table
+is on [Exit codes](/reference/exit-codes).
+
+## Passing arguments through
+
+Everything after `--` is appended to the resolved command, quoted per element for the shell that
+will receive it.
+
+```bash
+pnpm test -- --watch
+```
+
+## When the name is wrong
+
+```
+$ rune run tset
+error: no script named `tset`
+
+did you mean `test`?
+
+scripts defined here:
+  build
+  lint
+  test
+```
+
+## Next
+
+[Adopting Rune in a monorepo](/guide/monorepo-adoption) moves an existing set of duplicated
+scripts into one config.

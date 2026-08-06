@@ -1,0 +1,116 @@
+.rune-home {
+  padding: 0 24px;
+}
+
+.rune-home__inner {
+  max-width: 1000px;
+  margin: 0 auto;
+  padding: 24px 0 8px;
+}
+
+.rune-home__heading {
+  font-size: 26px;
+  font-weight: 640;
+  letter-spacing: -0.02em;
+  color: var(--rune-text-primary);
+  margin: 56px 0 10px;
+  padding-top: 32px;
+  border-top: 1px solid var(--rune-rule-shadow);
+  box-shadow: 0 -1px 0 var(--rune-rule-light) inset;
+}
+
+.rune-home__lede {
+  color: var(--rune-text-secondary);
+  max-width: 66ch;
+  margin: 0 0 24px;
+  line-height: 1.65;
+}
+
+.rune-home__pair {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+.rune-panel {
+  border: 1px solid var(--rune-rule-shadow);
+  background: var(--rune-bg-code);
+  min-width: 0;
+}
+
+.rune-panel--wide {
+  max-width: 460px;
+}
+
+.rune-panel__title {
+  font-family: var(--rp-font-family-mono);
+  font-size: 11px;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--rune-text-muted);
+  background: var(--rune-bg-surface);
+  border-bottom: 1px solid var(--rune-rule-shadow);
+  padding: 9px 14px;
+}
+
+.rune-panel__body {
+  margin: 0;
+  padding: 16px 14px;
+  overflow-x: auto;
+  font-family: var(--rp-font-family-mono);
+  font-size: 13px;
+  line-height: 1.75;
+  color: var(--rune-text-primary);
+  white-space: pre;
+}
+
+.rune-tok--keyword {
+  color: var(--rune-syntax-keyword);
+}
+.rune-tok--string {
+  color: var(--rune-syntax-string);
+}
+.rune-tok--comment {
+  color: var(--rune-syntax-comment);
+}
+
+.rune-home__cards {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
+.rune-card {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding: 20px;
+  border: 1px solid var(--rune-rule-shadow);
+  background: var(--rune-bg-surface);
+  text-decoration: none;
+}
+
+.rune-card:hover {
+  background: var(--rune-bg-selected);
+}
+
+.rune-card__title {
+  font-size: 17px;
+  font-weight: 640;
+  letter-spacing: -0.015em;
+  color: var(--rune-brand);
+}
+
+.rune-card__body {
+  font-size: 14.5px;
+  line-height: 1.6;
+  color: var(--rune-text-secondary);
+}
+
+@media (max-width: 860px) {
+  .rune-home__pair,
+  .rune-home__cards {
+    grid-template-columns: 1fr;
+  }
+}

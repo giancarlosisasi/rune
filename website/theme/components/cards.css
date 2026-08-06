@@ -1,0 +1,33 @@
+.rune-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 16px;
+  margin: 24px 0;
+}
+
+.rune-cards__item {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 18px 20px;
+  border: 1px solid var(--rune-rule-shadow);
+  background: var(--rune-bg-surface);
+  text-decoration: none;
+}
+
+.rune-cards__item:hover {
+  background: var(--rune-bg-selected);
+}
+
+.rune-cards__title {
+  font-size: 16px;
+  font-weight: 640;
+  letter-spacing: -0.015em;
+  color: var(--rune-brand);
+}
+
+.rune-cards__body {
+  font-size: 14.5px;
+  line-height: 1.6;
+  color: var(--rune-text-secondary);
+}

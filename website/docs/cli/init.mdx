@@ -1,0 +1,93 @@
+---
+title: 'rune init'
+description: 'Write a commented starter rune.config.ts, optionally seeded from the scripts in the nearest package.json.'
+---
+
+# rune init
+
+```
+rune init [--from-package-json]
+```
+
+Writes `rune.config.ts` in the current directory. It refuses to overwrite an existing file and
+exits 1 when one is there.
+
+## A fresh config
+
+```bash
+rune init
+```
+
+```ts title="rune.config.ts"
+import { defineConfig } from '@giancarlosio/rune';
+
+export default defineConfig({
+  scripts: {
+    // Every script is one entry. `command` is handed to the platform shell,
+    // so pipes, && and redirection all work.
+    build: {
+      command: 'tsc --build',
+      description: 'Compile every package',
+    },
+
+    // A package can sharpen this one without editing its package.json:
+    //   packages/legacy/rune.config.ts
+    //   test: { extends: 'test', appendArgs: ['--maxWorkers=1'] }
+    test: {
+      command: 'vitest run',
+      description: 'Run unit tests',
+    },
+  },
+});
+```
+
+The generated file loads through the normal pipeline. `rune list` works immediately after `init`.
+
+## Seeding from package.json
+
+```bash
+rune init --from-package-json
+```
+
+Reads the nearest `package.json` and writes one command script per entry in its `scripts` field,
+keeping the command strings exactly as they were.
+
+Given:
+
+```json title="packages/api/package.json"
+{
+  "scripts": {
+    "build": "tsc --build",
+    "test": "vitest run --coverage",
+    "dev": "tsx watch src/main.ts"
+  }
+}
+```
+
+The result:
+
+```ts title="rune.config.ts"
+import { defineConfig } from '@giancarlosio/rune';
+
+export default defineConfig({
+  scripts: {
+    build: { command: 'tsc --build' },
+    dev: { command: 'tsx watch src/main.ts' },
+    test: { command: 'vitest run --coverage' },
+  },
+});
+```
+
+Scripts are written sorted by name. Descriptions are left out, because `package.json` has nowhere
+to put one.
+
+Move the file to the repository root and delete the entries that belong to one package only. What
+remains is the shared set. [Adopting Rune in a monorepo](/guide/monorepo-adoption) covers the rest.
+
+## Exit codes
+
+| Situation | Code |
+| --- | --- |
+| File written | 0 |
+| `rune.config.ts` already exists | 1, and nothing is written |
+| `--from-package-json` with no `package.json` above the current directory | 1 |

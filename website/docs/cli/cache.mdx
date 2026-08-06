@@ -1,0 +1,48 @@
+---
+title: 'rune cache'
+description: 'Remove the resolved-config cache under node_modules/.cache/rune, and what the cache stores.'
+---
+
+# rune cache
+
+```
+rune cache clear
+```
+
+Removes the cache directory for the current repository.
+
+```bash
+$ rune cache clear
+$ echo $?
+0
+```
+
+Nothing to remove is a success. The command exits 0 whether or not a cache existed, so it is safe
+in a script that runs unconditionally.
+
+## What is cached
+
+The resolved config, as JSON, at `node_modules/.cache/rune/`. The key is a hash of the entry
+config's bytes, every file it transitively imports, the Rune binary version, the platform, and the
+values of the environment variables the config read.
+
+The cache is content addressed. Editing a file misses; restoring it to its original bytes hits the
+original entry again. There is no expiry.
+
+## When to clear it
+
+Rarely. The key covers everything that changes the result, so a stale hit is not a normal failure
+mode. Clearing is useful when reproducing a load bug, or when reclaiming the directory.
+
+Every cache failure already degrades to full evaluation with nothing on stderr: an unreadable entry
+is a miss, and an unwritable directory is a miss that still exits 0.
+
+## Where it lives
+
+| | |
+| --- | --- |
+| Directory | `<config root>/node_modules/.cache/rune/` |
+| Files | `config-<hash>.json` |
+
+The directory sits under `node_modules`, which is already ignored by version control and already
+removed by a clean install.

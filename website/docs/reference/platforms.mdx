@@ -1,0 +1,82 @@
+---
+title: 'Platforms'
+description: 'The six platform packages, the Linux musl decision, Windows arm64 emulation, and how the npm wrapper resolves a binary.'
+---
+
+# Platforms
+
+Rune ships one native binary per platform. The meta package `@giancarlosio/rune` lists all six as
+exact-pinned optional dependencies, and the package manager installs the one that matches.
+
+| Platform | Package | Target triple |
+| --- | --- | --- |
+| Windows x64 | `@giancarlosio/rune-win32-x64` | `x86_64-pc-windows-msvc` |
+| Windows arm64 | `@giancarlosio/rune-win32-arm64` | `x86_64-pc-windows-msvc`, run under emulation |
+| macOS x64 | `@giancarlosio/rune-darwin-x64` | `x86_64-apple-darwin` |
+| macOS arm64 | `@giancarlosio/rune-darwin-arm64` | `aarch64-apple-darwin` |
+| Linux x64 | `@giancarlosio/rune-linux-x64` | `x86_64-unknown-linux-musl` |
+| Linux arm64 | `@giancarlosio/rune-linux-arm64` | `aarch64-unknown-linux-musl` |
+
+Tested floors: Windows 10, macOS 10.15 on x64 and macOS 11 on arm64, any Linux distribution.
+
+## Linux
+
+Both Linux binaries are statically linked against musl, so one binary per architecture runs
+everywhere. There is no glibc and musl split, no minimum glibc version, and no runtime detection in
+the wrapper. Alpine and Debian install the same package.
+
+## Windows arm64
+
+The arm64 package carries the x64 binary and runs under Windows on ARM emulation. Where the arm64
+package is missing but the x64 one is installed, the wrapper spawns the x64 binary and says so
+once:
+
+```
+warning: no arm64 binary found, running the x64 build under emulation
+```
+
+## Installation shape
+
+The meta package declares no `engines`, no `os` and no `cpu`, so it installs everywhere and its
+diagnostics can run on a machine it does not support. There is no postinstall script, no download
+at install time, and no network access after the packages are fetched.
+
+Platform packages set `preferUnplugged: true` so Yarn Plug'n'Play materialises the executable on
+disk, which it must be to run.
+
+## Wrapper resolution
+
+1. `RUNE_BINARY_PATH`, when set. A missing file there is a hard error.
+2. `require.resolve` on the platform package for the current `process.platform` and
+   `process.arch`.
+3. On arm64, the x64 sibling, with the warning above.
+4. Diagnostics.
+
+The binary is spawned with inherited standard input, output and error. The wrapper mirrors the
+child's exit code, and re-raises the child's fatal signal on itself so the parent shell sees
+`128 + n` rather than a plain exit.
+
+## Diagnostics
+
+When no binary resolves, the wrapper reports the reason it can prove rather than a generic message:
+
+| Cause | What it prints |
+| --- | --- |
+| Platform outside the table | The supported matrix, and the platform and architecture it found |
+| Lockfile omits optional dependencies | The exact command that repairs it, for the detected package manager |
+| Binaries for another platform present | An explanation naming the likely cause, usually a container or WSL boundary |
+| Anything else | The resolution paths it tried |
+
+The package manager is detected from `npm_config_user_agent`, so the repair command matches the one
+in use.
+
+## Building from source
+
+```bash
+git clone https://github.com/giancarlosio/rune
+cd rune
+cargo build --release
+RUNE_BINARY_PATH=$PWD/target/release/rune pnpm test
+```
+
+The release profile uses fat link-time optimisation, one codegen unit and stripped symbols.

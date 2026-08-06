@@ -1,0 +1,86 @@
+---
+title: 'Adopting Rune in a monorepo'
+description: 'Move duplicated package.json scripts into one rune.config.ts, package by package, and handle the packages that need a different flag.'
+---
+
+# Adopting Rune in a monorepo
+
+Adoption is per script and per package. A repository can run one script through Rune and leave the
+rest alone for as long as it likes.
+
+## Seeding the config from an existing package
+
+`rune init --from-package-json` reads the nearest `package.json` and writes one command script per
+entry in its `scripts` field. Start from the package whose scripts are the most copied.
+
+```bash
+cd packages/api
+pnpm rune init --from-package-json
+```
+
+Move the generated file to the repository root, then delete the entries that are genuinely local to
+one package. What remains is the shared set.
+
+## Switching packages over
+
+For each package, replace the command string with a reference:
+
+```diff title="packages/web/package.json"
+  "scripts": {
+-   "test": "vitest run --coverage --reporter=dot --pool=threads",
++   "test": "rune run test"
+  }
+```
+
+Run `rune list` from inside the package to confirm the name resolves before deleting the original
+string.
+
+## The package that needs one extra flag
+
+This is the case that usually stops a shared script from being shared. Put a `rune.config.ts` in
+that package and extend the root definition.
+
+```ts title="packages/legacy/rune.config.ts"
+import { defineConfig } from '@giancarlosio/rune';
+
+export default defineConfig({
+  scripts: {
+    test: {
+      extends: 'test',
+      appendArgs: ['--maxWorkers=1'],
+    },
+  },
+});
+```
+
+`rune run test` inside `packages/legacy` now runs the root command with the extra flag. Every other
+package is unchanged, and `packages/legacy/package.json` still says `rune run test`.
+
+An override may extend a script. It may not replace one. A package config that defines `test` with
+its own `command` is a validation error, because a name that means two different things across the
+repository is the duplication Rune removes. If the command really is different, give it a different
+name.
+
+## Checking what a package resolves to
+
+```bash
+cd packages/legacy
+pnpm rune inspect test
+```
+
+`inspect` prints the resolved command, the working directory, the environment delta and the chain
+of definitions that produced them. It never spawns anything.
+
+## Verifying the whole repository
+
+```bash
+pnpm -r exec rune list
+```
+
+Each package prints the scripts visible to it, with `(overridden here)` next to the ones its own
+config sharpens.
+
+## Next
+
+[Turborepo and Nx](/guide/task-runners) covers the one configuration change a task runner needs
+once script strings stop changing.

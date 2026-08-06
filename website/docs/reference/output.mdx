@@ -1,0 +1,69 @@
+---
+title: 'Prefixed output'
+description: 'How a parallel group labels each line, handles partial lines and colour, and what grouped mode changes.'
+---
+
+# Prefixed output
+
+A single script and a serial group inherit the terminal, so their output is untouched. A parallel
+group pipes its members so each line can say which script wrote it.
+
+```
+[api]  listening on http://localhost:4000
+[web]  vite v6.0.1  ready in 412 ms
+[web]  ➜ Local:   http://localhost:5173/
+[api]  GET /health 200 1.2 ms
+```
+
+## The prefix
+
+The prefix is the member's script name, padded to the width of the longest name in the group, in a
+colour that stays the same for the whole run. Colours come from the cool half of the spectrum only,
+because green, amber and red mean pass, warn and fail everywhere else in Rune's output.
+
+## Partial lines
+
+Bytes are forwarded as they arrive, not held until a newline. A prompt that ends mid-line renders
+immediately rather than waiting for output that may never come.
+
+When a different script writes while a line is still open, Rune injects a newline first, so two
+scripts never share a line. A carriage return re-emits the prefix, which keeps progress bars that
+redraw a single line readable.
+
+Child bytes themselves are never rewritten. Whatever the tool emitted is what reaches the terminal,
+minus nothing.
+
+## Colour through the pipe
+
+A piped process sees a pipe rather than a terminal, and most tools turn colour off when they do.
+Rune detects colour support on its own output and forwards `FORCE_COLOR` to piped members, so tools
+that honour it keep their colour.
+
+`NO_COLOR` set to any value turns off Rune's own colour, including prefixes.
+
+A member with `interactive: true` is not piped at all. It inherits the terminal, so it is not
+prefixed and it detects colour for itself.
+
+## Grouped output
+
+`--group-output` buffers each member and prints it in one block when it finishes, instead of
+interleaving.
+
+```bash
+rune run ci --group-output
+```
+
+Useful in CI logs, where interleaved output from four members is hard to read after the fact.
+Buffering means a member's output appears only after it exits, so it is the wrong choice while
+watching a long run.
+
+## Broken pipes
+
+When Rune's own output goes to a pipe that closes, such as `rune run dev | head -20`, it stops
+writing, terminates the members, and exits. It does not keep running invisibly with nowhere to
+write.
+
+## Encoding
+
+Output is decoded incrementally, so a multi-byte character split across two reads is reassembled
+rather than corrupted. Bytes that are not valid UTF-8 pass through as they arrived.

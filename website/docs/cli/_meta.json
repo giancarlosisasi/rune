@@ -1,0 +1,8 @@
+[
+  { "type": "file", "name": "index", "label": "Commands" },
+  "run",
+  "list",
+  "inspect",
+  "init",
+  "cache"
+]

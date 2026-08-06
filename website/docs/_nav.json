@@ -1,0 +1,6 @@
+[
+  { "text": "Guide", "link": "/guide/", "activeMatch": "/guide/" },
+  { "text": "Config", "link": "/config/", "activeMatch": "/config/" },
+  { "text": "CLI", "link": "/cli/", "activeMatch": "/cli/" },
+  { "text": "Reference", "link": "/reference/exit-codes", "activeMatch": "/reference/" }
+]

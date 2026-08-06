@@ -1,0 +1,127 @@
+---
+title: 'Groups'
+description: 'serial and parallel groups, dependsOn, kill-on-failure, successPolicy, interactive members, and the exit code a group reports.'
+---
+
+# Groups
+
+A group runs several scripts under one name. Members are referenced by name and validated when the
+config loads, so a typo in a member name fails before anything spawns.
+
+## serial
+
+Members run one at a time, in order, each with the terminal to itself.
+
+```ts
+ci: {
+  serial: ['build', 'test', 'lint'],
+  description: 'Build, then test, then lint',
+}
+```
+
+The group stops at the first failure and exits with that member's code. Later members never start.
+
+`continueOnError: true` runs every member regardless, and the group exits with the first failing
+code once they have all finished.
+
+Because only one process runs at a time, a serial group behaves exactly like a single script: the
+child inherits the terminal, and interactive tools work untouched.
+
+## dependsOn
+
+`dependsOn` puts scripts in front of a single script rather than composing a new name.
+
+```ts
+test: {
+  command: 'vitest run',
+  dependsOn: ['build'],
+}
+```
+
+Dependencies run serially, in the order listed, before the script itself. A failing dependency
+stops the run with its own code.
+
+There is no `pre` and `post` naming convention. A script that should run first says so.
+
+## parallel
+
+Members run at the same time, with their output piped and prefixed.
+
+```ts
+dev: {
+  parallel: ['dev:api', 'dev:web'],
+  description: 'Serve the API and the web app',
+}
+```
+
+```
+[api]  listening on http://localhost:4000
+[web]  vite v6.0.1  ready in 412 ms
+[web]  ➜ Local:   http://localhost:5173/
+```
+
+Prefix colours are stable per script for the life of the run. See
+[Prefixed output](/reference/output) for how interleaving, partial lines and colour are handled.
+
+### Failure
+
+By default, one member failing terminates the rest. Each surviving member gets `killSignal`
+(`SIGTERM` by default), and `SIGKILL` after `killTimeout` if it is still alive. On Windows the
+member's whole process tree is terminated through its job object. A member that had already exited
+is not an error.
+
+```
+error: member `api` exited 1 — stopping `web`
+       web terminated after SIGTERM (0.04 s)
+```
+
+`continueOnError: true` lets the others finish.
+
+### successPolicy
+
+| Value | The group succeeds when |
+| --- | --- |
+| `all` (default) | Every member exits 0 |
+| `first` | The first member to exit did so with 0 |
+| `last` | The last member to exit did so with 0 |
+
+`first` and `last` are evaluated in chronological exit order, not in the order the members are
+listed.
+
+### interactive members
+
+A member that needs a real terminal keeps one:
+
+```ts
+dev: {
+  parallel: ['dev:api', 'dev:shell'],
+},
+'dev:shell': {
+  command: 'node --inspect repl.js',
+  interactive: true,
+}
+```
+
+An interactive member inherits standard input, output and error instead of being piped, so it is
+not prefixed and its output is not multiplexed. Use it for one member at most; two processes reading
+the same terminal fight over it.
+
+## Exit codes
+
+| Situation | The group exits with |
+| --- | --- |
+| Serial member fails | That member's code. Later members do not start |
+| Parallel member fails | The first failing member's code, chronologically |
+| `successPolicy` is satisfied | 0 |
+| Ctrl+C | The code the interrupted members produce, mapped the usual way |
+
+The full table is on [Exit codes](/reference/exit-codes).
+
+## What a group cannot carry
+
+A group entry accepts `description`, `cwd`, `env`, `envFile`, `continueOnError` and, for parallel,
+`successPolicy`. It does not accept `command`, `timeout`, `retries`, `killSignal` or `interactive`.
+Those describe a process, and a group is not one. Put them on the members.
+
+Groups nest. A `parallel` group may list a `serial` group as a member, which is how a sequence runs
+alongside a watcher. There are no dependency edges between members of one group; nest instead.

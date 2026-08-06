@@ -1,0 +1,545 @@
+/*
+ * Rune theme — implements docs/design-system/spec.md (direction `stonecut`).
+ *
+ * Selector choice: Rspress 2.0.19 declares its own variables under `:where(...)`, which
+ * has zero specificity, but its callout variables under plain `:root` and `.dark`, which
+ * do not. `html:root` and `html.rp-dark` beat both regardless of import order.
+ * The runtime sets `dark` and `rp-dark` together; `rp-dark` is the canonical one.
+ */
+
+html:root {
+  --rune-bg-base: #f5f3ef;
+  --rune-bg-surface: #ebe8e2;
+  --rune-bg-overlay: #fcfbf9;
+  --rune-bg-selected: #e1ddd4;
+  --rune-bg-code: #edeae4;
+
+  --rune-text-primary: #14181d;
+  --rune-text-secondary: #3c444c;
+  --rune-text-muted: #565e67;
+  --rune-text-faint: #727a82;
+
+  --rune-brand: #243f9e;
+  --rune-brand-strong: #1b3080;
+  --rune-brand-soft: #4761c0;
+  --rune-brand-wash: rgba(36, 63, 158, 0.09);
+
+  --rune-success: #1a6040;
+  --rune-warning: #7a5605;
+  --rune-error: #a62828;
+
+  --rune-control: #6e7378;
+  --rune-rule-shadow: rgba(20, 24, 29, 0.16);
+  --rune-rule-light: rgba(255, 255, 255, 0.85);
+
+  --rune-syntax-keyword: #243f9e;
+  --rune-syntax-string: #1a6040;
+  --rune-syntax-constant: #5a3e9e;
+  --rune-syntax-param: #3c444c;
+  /* Comments are text a reader reads, so they take a text token, never `faint`. */
+  --rune-syntax-comment: #565e67;
+  --rune-syntax-punct: #3c444c;
+
+  --rune-on-brand: #fcfbf9;
+}
+
+html.rp-dark {
+  --rune-bg-base: #0f1215;
+  --rune-bg-surface: #171b1f;
+  --rune-bg-overlay: #1e2328;
+  --rune-bg-selected: #252b31;
+  --rune-bg-code: #0b0e10;
+
+  --rune-text-primary: #e6eaee;
+  --rune-text-secondary: #aeb7c0;
+  --rune-text-muted: #8e98a2;
+  --rune-text-faint: #727c86;
+
+  --rune-brand: #8fa8ff;
+  --rune-brand-strong: #b3c3ff;
+  --rune-brand-soft: #6f8ce8;
+  --rune-brand-wash: rgba(143, 168, 255, 0.13);
+
+  --rune-success: #5fc08a;
+  --rune-warning: #e0b057;
+  --rune-error: #f08585;
+
+  --rune-control: #7b848c;
+  --rune-rule-shadow: rgba(0, 0, 0, 0.55);
+  --rune-rule-light: rgba(230, 234, 238, 0.1);
+
+  --rune-syntax-keyword: #8fa8ff;
+  --rune-syntax-string: #5fc08a;
+  --rune-syntax-constant: #b79cff;
+  --rune-syntax-param: #aeb7c0;
+  --rune-syntax-comment: #8e98a2;
+  --rune-syntax-punct: #aeb7c0;
+
+  --rune-on-brand: #0f1215;
+}
+
+/* ---------------------------------------------------------------- Rspress mapping
+ * Declared once, in terms of the tokens above, so neither theme repeats the mapping.
+ */
+
+html:root {
+  --rp-c-brand: var(--rune-brand);
+  --rp-c-brand-light: var(--rune-brand-soft);
+  --rp-c-brand-lighter: var(--rune-brand-soft);
+  --rp-c-brand-dark: var(--rune-brand);
+  --rp-c-brand-darker: var(--rune-brand-strong);
+  --rp-c-brand-tint: var(--rune-brand-wash);
+  --rp-c-link: var(--rune-brand);
+
+  --rp-c-bg: var(--rune-bg-base);
+  --rp-c-bg-soft: var(--rune-bg-surface);
+  --rp-c-bg-mute: var(--rune-bg-selected);
+  --rp-c-bg-alt: var(--rune-bg-overlay);
+  --rp-c-bg-dark: var(--rune-bg-code);
+
+  --rp-c-text-0: var(--rune-text-primary);
+  --rp-c-text-1: var(--rune-text-primary);
+  --rp-c-text-2: var(--rune-text-secondary);
+  --rp-c-text-3: var(--rune-text-muted);
+  --rp-c-text-4: var(--rune-text-faint);
+
+  --rp-c-divider: var(--rune-rule-shadow);
+  --rp-c-divider-light: var(--rune-rule-shadow);
+  --rp-c-divider-dark: var(--rune-rule-shadow);
+
+  /* Inline code keeps the text colour so the brand marks links and nothing else. */
+  --rp-c-text-code: var(--rune-text-primary);
+  --rp-c-text-code-bg: var(--rune-bg-selected);
+  --rp-c-text-code-border: var(--rune-rule-shadow);
+
+  --rp-code-block-bg: var(--rune-bg-code);
+  --rp-code-block-color: var(--rune-text-primary);
+  --rp-code-block-border: 1px solid var(--rune-rule-shadow);
+  --rp-code-block-shadow: none;
+  --rp-code-title-bg: var(--rune-bg-surface);
+  --rp-code-font-size: 0.845rem;
+  --rp-code-line-highlight-color: var(--rune-bg-selected);
+
+  --rp-c-gray: var(--rune-text-muted);
+  --rp-c-gray-light-1: var(--rune-text-faint);
+  --rp-c-gray-light-2: var(--rune-control);
+  --rp-c-gray-light-3: var(--rune-bg-selected);
+  --rp-c-gray-light-4: var(--rune-bg-surface);
+  --rp-c-gray-light-5: var(--rune-bg-surface);
+
+  --rp-c-overview-group-bg: var(--rune-bg-surface);
+  --rp-c-overview-group-bg-hover: var(--rune-bg-selected);
+  --rp-c-overview-group-border: var(--rune-rule-shadow);
+
+  /* Square everywhere. The incision idea depends on it. */
+  --rp-radius: 0px;
+  --rp-radius-small: 0px;
+  --rp-radius-large: 0px;
+
+  --rp-shadow-1: none;
+  --rp-shadow-2: none;
+  --rp-shadow-3: none;
+  --rp-shadow-4: none;
+  --rp-shadow-5: none;
+
+  --rp-font-family-base: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto,
+    Helvetica, Arial, sans-serif;
+  --rp-font-family-mono: ui-monospace, 'SF Mono', 'Cascadia Mono', 'JetBrains Mono', Menlo,
+    Consolas, monospace;
+
+  /* Stock values are multi-layer purple radial gradients. */
+  --rp-home-background-bg: var(--rune-bg-base);
+  --rp-home-feature-bg: var(--rune-bg-surface);
+  --rp-home-hero-title-bg: none;
+  --rp-home-hero-title-color: var(--rune-text-primary);
+  --rp-home-hero-secondary-color: var(--rune-brand);
+
+  /* Note and details are neutral; the rest carry a status the palette owns. */
+  --rp-container-note-bg: var(--rune-bg-surface);
+  --rp-container-note-border: var(--rune-rule-shadow);
+  --rp-container-note-text: var(--rune-text-primary);
+  --rp-container-note-code-bg: var(--rune-bg-selected);
+  --rp-container-note-link: var(--rune-brand);
+
+  --rp-container-details-bg: var(--rune-bg-surface);
+  --rp-container-details-border: var(--rune-rule-shadow);
+  --rp-container-details-text: var(--rune-text-primary);
+  --rp-container-details-code-bg: var(--rune-bg-selected);
+
+  --rp-container-tip-bg: var(--rune-brand-wash);
+  --rp-container-tip-border: var(--rune-brand);
+  --rp-container-tip-text: var(--rune-brand);
+  --rp-container-tip-code-bg: var(--rune-brand-wash);
+
+  --rp-container-info-bg: var(--rune-brand-wash);
+  --rp-container-info-border: var(--rune-brand);
+  --rp-container-info-text: var(--rune-brand);
+  --rp-container-info-code-bg: var(--rune-brand-wash);
+
+  --rp-container-important-bg: color-mix(in srgb, var(--rune-error) 10%, transparent);
+  --rp-container-important-border: var(--rune-error);
+  --rp-container-important-text: var(--rune-error);
+  --rp-container-important-code-bg: color-mix(in srgb, var(--rune-error) 14%, transparent);
+
+  --rp-container-warning-bg: color-mix(in srgb, var(--rune-warning) 10%, transparent);
+  --rp-container-warning-border: var(--rune-warning);
+  --rp-container-warning-text: var(--rune-warning);
+  --rp-container-warning-code-bg: color-mix(in srgb, var(--rune-warning) 14%, transparent);
+
+  --rp-container-danger-bg: color-mix(in srgb, var(--rune-error) 10%, transparent);
+  --rp-container-danger-border: var(--rune-error);
+  --rp-container-danger-text: var(--rune-error);
+  --rp-container-danger-code-bg: color-mix(in srgb, var(--rune-error) 14%, transparent);
+
+  --shiki-foreground: var(--rune-text-primary);
+  --shiki-background: transparent;
+  --shiki-token-keyword: var(--rune-syntax-keyword);
+  --shiki-token-string: var(--rune-syntax-string);
+  --shiki-token-string-expression: var(--rune-syntax-string);
+  --shiki-token-constant: var(--rune-syntax-constant);
+  --shiki-token-function: var(--rune-syntax-constant);
+  --shiki-token-parameter: var(--rune-syntax-param);
+  --shiki-token-link: var(--rune-syntax-param);
+  --shiki-token-comment: var(--rune-syntax-comment);
+  --shiki-token-punctuation: var(--rune-syntax-punct);
+  --shiki-token-inserted: var(--rune-success);
+  --shiki-token-deleted: var(--rune-error);
+}
+
+/* ---------------------------------------------------------------- the incision
+ * A cut reads as one dark hairline with one light hairline under it. One line alone is
+ * a border, not a cut, so both declarations always travel together.
+ */
+
+.rp-doc hr,
+.rp-doc-footer__divider,
+.rp-outline__divider,
+.rp-not-found__divider {
+  border: 0;
+  border-top: 1px solid var(--rune-rule-shadow);
+  box-shadow: 0 1px 0 var(--rune-rule-light);
+  margin: 48px 0;
+  height: 0;
+}
+
+.rp-doc h2 {
+  border-top: 1px solid var(--rune-rule-shadow);
+  box-shadow: 0 -1px 0 var(--rune-rule-light) inset;
+  padding-top: 32px;
+  margin-top: 48px;
+  font-size: 26px;
+  font-weight: 640;
+  letter-spacing: -0.02em;
+}
+
+/* The stock theme draws its own separator before the first h2, which would sit
+   above the cut and read as a double rule. */
+.rp-doc h2:first-of-type::before {
+  display: none;
+}
+
+.rp-doc h1 {
+  font-size: 40px;
+  letter-spacing: -0.02em;
+  font-weight: 680;
+}
+
+.rp-doc h3 {
+  font-size: 19px;
+  letter-spacing: -0.015em;
+  font-weight: 640;
+}
+
+.rp-doc h4 {
+  font-size: 15px;
+  font-weight: 640;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--rune-text-muted);
+}
+
+.rp-doc p,
+.rp-doc li {
+  color: var(--rune-text-secondary);
+}
+
+.rp-doc strong {
+  color: var(--rune-text-primary);
+}
+
+/* ---------------------------------------------------------------- tables */
+
+.rp-doc table {
+  display: table;
+  width: 100%;
+  border-collapse: collapse;
+  border: 0;
+  font-size: 15px;
+}
+
+.rp-doc table th,
+.rp-doc table td {
+  border: 0;
+  border-bottom: 1px solid var(--rune-rule-shadow);
+  padding: 10px 12px;
+  text-align: left;
+  vertical-align: top;
+}
+
+.rp-doc table th {
+  background: transparent;
+  font-family: var(--rp-font-family-mono);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--rune-text-muted);
+}
+
+.rp-doc table tr {
+  background: transparent;
+}
+
+.rp-doc table tbody tr:hover {
+  background: var(--rune-bg-selected);
+}
+
+.rp-table-scroll-container {
+  overflow-x: auto;
+}
+
+/* ---------------------------------------------------------------- code */
+
+.rp-codeblock {
+  border-radius: 0;
+}
+
+.rp-codeblock__title {
+  border-radius: 0;
+  border-bottom: 1px solid var(--rune-rule-shadow);
+  font-family: var(--rp-font-family-mono);
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  color: var(--rune-text-muted);
+}
+
+.rp-doc :not(pre) > code {
+  border-radius: 0;
+  font-size: 0.88em;
+}
+
+/* ---------------------------------------------------------------- callouts */
+
+.rp-callout {
+  border-radius: 0;
+  border-width: 0 0 0 3px;
+  border-left-style: solid;
+  padding: 16px 20px 6px;
+}
+
+.rp-callout__title {
+  font-family: var(--rp-font-family-mono);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+/* ---------------------------------------------------------------- chrome */
+
+.rp-nav {
+  border-bottom: 1px solid var(--rune-rule-shadow);
+  box-shadow: 0 1px 0 var(--rune-rule-light);
+  backdrop-filter: none;
+}
+
+.rp-nav__title {
+  font-weight: 660;
+  letter-spacing: -0.015em;
+}
+
+.rp-nav-menu__item--active {
+  color: var(--rune-brand);
+}
+
+.rp-sidebar-item,
+.rp-sidebar-group,
+.rp-toc-item {
+  border-radius: 0;
+}
+
+.rp-sidebar-item--active,
+.rp-sidebar-item--active .rp-sidebar-item__link {
+  background: transparent;
+  color: var(--rune-brand);
+  font-weight: 600;
+  box-shadow: inset 2px 0 0 var(--rune-brand);
+}
+
+.rp-toc-item--active {
+  color: var(--rune-brand);
+  border-left-color: var(--rune-brand);
+}
+
+.rp-sidebar-section-header {
+  font-family: var(--rp-font-family-mono);
+  font-size: 11px;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--rune-text-muted);
+}
+
+.rp-search-button,
+.rp-search-panel__modal,
+.rp-search-panel__input,
+.rp-suggest-item {
+  border-radius: 0;
+}
+
+.rp-search-button {
+  border: 1px solid var(--rune-control);
+  background: transparent;
+}
+
+.rp-outline__title {
+  font-family: var(--rp-font-family-mono);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--rune-text-muted);
+}
+
+.rp-button,
+.rp-badge,
+.rp-prev-next-page__item {
+  border-radius: 0;
+}
+
+.rp-button--brand {
+  background: var(--rune-brand);
+  color: var(--rune-on-brand);
+  border-color: var(--rune-brand);
+}
+
+.rp-button--alt {
+  background: transparent;
+  border: 1px solid var(--rune-control);
+  color: var(--rune-text-primary);
+}
+
+.rp-button--alt:hover {
+  background: var(--rune-bg-surface);
+}
+
+.rp-prev-next-page__item {
+  border: 1px solid var(--rune-rule-shadow);
+}
+
+/* ---------------------------------------------------------------- home */
+
+.rp-home-hero__title {
+  background: none;
+  background-clip: border-box;
+  -webkit-text-fill-color: currentColor;
+  color: var(--rune-text-primary);
+  letter-spacing: -0.03em;
+}
+
+.rp-home-hero__title-brand {
+  color: var(--rune-brand);
+}
+
+.rp-home-hero__subtitle {
+  color: var(--rune-text-primary);
+}
+
+.rp-home-hero__tagline {
+  color: var(--rune-text-secondary);
+}
+
+/* The stock hero carries 80 px of margin on both sides, sized for a hero image
+   this site does not use. The section below it owns its own spacing instead. */
+.rp-home-hero {
+  margin-bottom: 0;
+}
+
+.rp-home-background {
+  background: var(--rune-bg-base);
+}
+
+.rp-home-feature__card {
+  border: 1px solid var(--rune-rule-shadow);
+  border-radius: 0;
+  background: var(--rune-bg-surface);
+  box-shadow: none;
+}
+
+.rp-home-feature__title {
+  letter-spacing: -0.015em;
+}
+
+.rp-home-feature__detail {
+  color: var(--rune-text-secondary);
+}
+
+/* ---------------------------------------------------------------- focus and motion */
+
+:focus-visible {
+  outline: 2px solid var(--rune-brand);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0ms !important;
+    animation-duration: 0ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* ---------------------------------------------------------------- footer */
+
+.rune-footer {
+  border-top: 1px solid var(--rune-rule-shadow);
+  box-shadow: 0 1px 0 var(--rune-rule-light);
+  padding: 32px 24px 48px;
+  font-size: 14px;
+  color: var(--rune-text-muted);
+}
+
+.rune-footer__inner {
+  max-width: 1000px;
+  margin: 0 auto;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 24px;
+  align-items: baseline;
+  justify-content: space-between;
+}
+
+.rune-footer__links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 20px;
+}
+
+.rune-footer a {
+  color: var(--rune-text-secondary);
+  text-decoration: none;
+  text-underline-offset: 3px;
+}
+
+.rune-footer a:hover {
+  color: var(--rune-brand);
+  text-decoration: underline;
+}
+
+.rune-footer__note {
+  max-width: 1000px;
+  margin: 12px auto 0;
+  font-size: 13px;
+  color: var(--rune-text-muted);
+}

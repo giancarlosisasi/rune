@@ -1,0 +1,102 @@
+---
+title: 'Inheritance and overrides'
+description: 'How extends and appendArgs build a command from another script, and why a package override may only sharpen a root script.'
+---
+
+# Inheritance and overrides
+
+Two mechanisms share one rule: a name means one command across the repository, and inheriting can
+only add to it.
+
+## extends
+
+An `extends` script resolves another script's command and appends its own arguments.
+
+```ts title="rune.config.ts"
+export default defineConfig({
+  scripts: {
+    test: { command: 'vitest run --reporter=dot' },
+    'test:coverage': { extends: 'test', appendArgs: ['--coverage'] },
+    'test:ci': { extends: 'test:coverage', appendArgs: ['--reporter=junit'] },
+  },
+});
+```
+
+`test:ci` resolves to:
+
+```
+vitest run --reporter=dot --coverage --reporter=junit
+```
+
+Chains resolve transitively, in declaration order from the base outward. A cycle is rejected with
+the names that form it.
+
+`appendArgs` entries are quoted per element for the shell that will run the command, the same way
+arguments after `--` are. An entry containing a space arrives as one argument.
+
+`appendArgs` without `extends` is a type error, and Rune rejects it as an unknown field.
+
+## Package overrides
+
+A package may hold its own `rune.config.ts`. Rune uses the nearest one it finds, so a script name
+defined in both resolves to the package's version.
+
+```ts title="packages/legacy/rune.config.ts"
+export default defineConfig({
+  scripts: {
+    test: { extends: 'test', appendArgs: ['--maxWorkers=1'] },
+  },
+});
+```
+
+Inside `packages/legacy`, `rune run test` runs the root command plus `--maxWorkers=1`. Everywhere
+else it runs the root command. Neither `package.json` changed.
+
+### Extend, never replace
+
+A package config that gives a colliding name its own `command` is a validation error:
+
+```
+error: packages/legacy/rune.config.ts is not a valid rune config
+
+script `test` also exists at the repository root.
+an override may extend a script, not replace it.
+
+either write `extends: 'test'`, or give this script a different name.
+```
+
+The reason is what the tool is for. A `test` that means one command in nine packages and something
+unrelated in the tenth reproduces the situation Rune removes, and it does it invisibly.
+
+A name that does not exist at the root is not an override. It is a new script, scoped to that
+package.
+
+### Ignoring the override
+
+`--root` resolves against the root config only.
+
+```bash
+rune run test --root
+```
+
+## Seeing the chain
+
+`rune inspect` prints the resolution, and it never spawns anything.
+
+```
+$ rune inspect test
+  script      test
+  defined     rune.config.ts:12                    root
+  overridden  packages/legacy/rune.config.ts:4     + --maxWorkers=1
+  command     vitest run --reporter=dot --maxWorkers=1
+  cwd         /repo/packages/legacy
+```
+
+`rune list` annotates the same information more briefly: `(defined here)` for a script this package
+owns, `(overridden here)` for one it sharpens.
+
+## The cache and two configs
+
+The resolved config is cached by content. When a package override is in play, both configs and
+everything they import enter the cache key, so editing either one invalidates the entry. See
+[Config evaluation](/config/evaluation).

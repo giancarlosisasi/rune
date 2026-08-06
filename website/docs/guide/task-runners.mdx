@@ -1,0 +1,70 @@
+---
+title: 'Turborepo and Nx'
+description: 'Add rune.config.ts to a task runner inputs list so a config change still invalidates the cache after script strings stop changing.'
+---
+
+# Turborepo and Nx
+
+Rune runs one script at a time and reports its exit code. Turborepo and Nx decide which packages
+run, in what order, and what can be skipped. The two layers stack: the task runner invokes
+`rune run …`, and Rune resolves and spawns.
+
+## The cache input
+
+Turborepo hashes the `package.json` script string as part of a task's cache key. Under Rune that
+string is `rune run test` forever, so editing the command in `rune.config.ts` no longer changes the
+hash. A cached result would then be replayed for a command that has changed.
+
+Add the config to `inputs` on every task that goes through Rune:
+
+```json title="turbo.json"
+{
+  "tasks": {
+    "test": {
+      "inputs": ["$TURBO_DEFAULT$", "../../rune.config.ts"],
+      "outputs": ["coverage/**"]
+    }
+  }
+}
+```
+
+`$TURBO_DEFAULT$` keeps the default input set and adds the config on top. If the config imports
+other files, list those too, or list the directory that holds them.
+
+:::warning
+This is the one change a task runner needs, and skipping it produces stale results rather than an
+error. Make it in the same commit that switches the first package over.
+:::
+
+## Nx
+
+Nx keys on `namedInputs` and on the executor's own inputs. Add the config to the shared input set:
+
+```json title="nx.json"
+{
+  "namedInputs": {
+    "default": ["{projectRoot}/**/*", "{workspaceRoot}/rune.config.ts"]
+  }
+}
+```
+
+## Ordering
+
+Rune has `dependsOn` and `serial` groups for ordering scripts inside one package. It does not order
+packages against each other, and it does not build a dependency graph from `package.json`. That
+stays with the task runner.
+
+Use the task runner when the order depends on the package graph. Use a Rune group when the order is
+a fixed sequence inside one package, such as generate, then build, then test.
+
+## What Rune does not do
+
+| Not this | Use |
+| --- | --- |
+| Task result caching | Turborepo, Nx |
+| Topological ordering across packages | Turborepo, Nx |
+| Remote execution | Turborepo, Nx |
+| Watch mode | The tool being run |
+
+Rune caches its own resolved config, which is a different thing: it makes Rune's own startup cost
+close to zero and has no effect on whether a task re-runs.
