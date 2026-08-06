@@ -25,11 +25,24 @@ serde_json = "1"
 thiserror = "2"
 blake3 = "1"
 dunce = "1"
+strsim = "0.11"
+
+# Platform primitives for process control. `nix` covers setpgid/killpg and sigaction;
+# `windows-sys` covers Job Objects and console control events.
+nix = { version = "0.31", features = ["fs", "process", "signal"] }
+windows-sys = { version = "0.61", features = [
+  "Win32_Foundation",
+  "Win32_Security",
+  "Win32_System_Console",
+  "Win32_System_JobObjects",
+  "Win32_System_Threading",
+] }
 
 insta = "1"
 tempfile = "3"
 unindent = "0.2"
 regex = "1"
+portable-pty = "0.9"
 
 [workspace.lints]
 

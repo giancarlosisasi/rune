@@ -7,6 +7,7 @@
 //! script is wrong and which word in it is the problem.
 
 use std::collections::BTreeMap;
+use std::path::Path;
 
 use serde::Deserialize;
 use thiserror::Error;
@@ -15,7 +16,7 @@ use thiserror::Error;
 const DISCRIMINANTS: &[&str] = &["command"];
 
 /// Fields any script may carry, whatever its discriminant.
-const COMMON_FIELDS: &[&str] = &["description"];
+const COMMON_FIELDS: &[&str] = &["description", "cwd", "env"];
 
 #[derive(Debug, Error)]
 pub enum SchemaError {
@@ -60,6 +61,20 @@ impl Script {
       Self::Command(script) => script.description.as_deref(),
     }
   }
+
+  /// Where the script runs. A relative value is resolved against the invoking package.
+  pub fn cwd(&self) -> Option<&Path> {
+    match self {
+      Self::Command(script) => script.cwd.as_deref().map(Path::new),
+    }
+  }
+
+  /// Variables the script sets for its own child, which win over inherited values.
+  pub fn env(&self) -> &BTreeMap<String, String> {
+    match self {
+      Self::Command(script) => &script.env,
+    }
+  }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -68,6 +83,10 @@ pub struct CommandScript {
   pub command: String,
   #[serde(default)]
   pub description: Option<String>,
+  #[serde(default)]
+  pub cwd: Option<String>,
+  #[serde(default)]
+  pub env: BTreeMap<String, String>,
 }
 
 /// Turns an evaluated config into the typed shape, or says exactly what is wrong with it.

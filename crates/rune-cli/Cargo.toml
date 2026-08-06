@@ -16,9 +16,20 @@ workspace = true
 [dependencies]
 clap = { workspace = true }
 rune-config = { path = "../rune-config" }
+rune-exec = { path = "../rune-exec" }
 rune-out = { path = "../rune-out" }
+strsim = { workspace = true }
 
 [dev-dependencies]
+insta = { workspace = true }
+portable-pty = { workspace = true }
 regex = { workspace = true }
+serde_json = { workspace = true }
 tempfile = { workspace = true }
 unindent = { workspace = true }
+
+[target.'cfg(unix)'.dev-dependencies]
+nix = { workspace = true }
+
+[target.'cfg(windows)'.dev-dependencies]
+windows-sys = { workspace = true }

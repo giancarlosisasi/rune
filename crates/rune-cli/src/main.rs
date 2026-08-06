@@ -3,6 +3,7 @@ use std::process::ExitCode;
 use clap::{Parser, Subcommand};
 
 mod list;
+mod run;
 
 #[derive(Parser)]
 #[command(name = "rune", version, about = "Centralized script runner for JS/TS monorepos")]
@@ -35,22 +36,31 @@ enum CacheCommand {
 fn main() -> ExitCode {
   let cli = Cli::parse();
 
-  let outcome = match cli.command {
-    Command::List => list::run(),
-    Command::Cache { command: CacheCommand::Clear } => list::clear_cache(),
-    Command::Run { name } => Err(format!("run {name}: not implemented yet")),
-    Command::Inspect { name } => Err(format!("inspect {name}: not implemented yet")),
-  };
+  match cli.command {
+    // The child's exit code is the product of this subcommand, so it does not go through
+    // the success-or-diagnostic path the others share.
+    Command::Run { name } => match run::run(&name) {
+      Ok(completion) => completion.exit_code(),
+      Err(message) => fail(&message),
+    },
+    Command::List => report(list::run()),
+    Command::Cache { command: CacheCommand::Clear } => report(list::clear_cache()),
+    Command::Inspect { name } => fail(&format!("inspect {name}: not implemented yet")),
+  }
+}
 
+fn report(outcome: Result<(), String>) -> ExitCode {
   match outcome {
     Ok(()) => ExitCode::SUCCESS,
-    Err(message) => {
-      // Never stdout: a diagnostic on stdout would be indistinguishable from a script's
-      // own output once `run` starts spawning children.
-      rune_out::diagnostic(&message);
-      ExitCode::FAILURE
-    }
+    Err(message) => fail(&message),
   }
+}
+
+fn fail(message: &str) -> ExitCode {
+  // Never stdout: a diagnostic there would be indistinguishable from a script's own
+  // output, and stdout belongs to the child.
+  rune_out::diagnostic(message);
+  ExitCode::FAILURE
 }
 
 #[cfg(test)]

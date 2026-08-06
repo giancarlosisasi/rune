@@ -16,7 +16,7 @@ fn version_is_printed_on_stdout() {
 /// a full help file would churn five more times and assert nothing in between.
 #[test]
 fn help_names_every_subcommand() {
-  let output = Test::new().args(["--help"]).stdout_regex(r"(?s)^Usage: rune").status(0).run();
+  let output = Test::new().args(["--help"]).stdout_regex(r"(?m)^Usage: rune").status(0).run();
 
   let stdout = String::from_utf8(output.stdout).expect("help is utf-8");
   for subcommand in ["run", "list", "inspect"] {
@@ -28,7 +28,12 @@ fn help_names_every_subcommand() {
 /// exit non-zero and go to stderr, because stdout belongs to the child process.
 #[test]
 fn unimplemented_subcommand_fails_on_stderr_with_empty_stdout() {
-  Test::new().args(["run", "build"]).stdout("").stderr_regex(r"not implemented").status(1).run();
+  Test::new()
+    .args(["inspect", "build"])
+    .stdout("")
+    .stderr_regex(r"not implemented")
+    .status(1)
+    .run();
 }
 
 /// clap accepts the grammar but rejects an unknown subcommand itself. Same contract.

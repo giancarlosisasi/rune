@@ -1,19 +1,23 @@
 [package]
-name = "rune-exec"
+name = "rune-testkit"
 version.workspace = true
 edition.workspace = true
 homepage.workspace = true
 license.workspace = true
 repository.workspace = true
+# A test fixture. It is built by the workspace and spawned by the test suites; it is
+# never shipped.
+publish = false
+
+[[bin]]
+name = "rune-testkit"
+path = "src/main.rs"
 
 [lints]
 workspace = true
 
 [dependencies]
-thiserror = { workspace = true }
+serde_json = { workspace = true }
 
 [target.'cfg(unix)'.dependencies]
 nix = { workspace = true }
-
-[target.'cfg(windows)'.dependencies]
-windows-sys = { workspace = true }

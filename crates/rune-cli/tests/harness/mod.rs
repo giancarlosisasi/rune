@@ -16,9 +16,53 @@ use regex::Regex;
 use tempfile::TempDir;
 use unindent::unindent;
 
+/// The entry that stops rune's upward config walk.
+///
+/// Every fixture gets one. Without it the walk leaves the temporary directory and finds
+/// whatever config happens to sit above it on the machine running the test, and the
+/// result stops being the same for everyone.
+const BOUNDARY: (&str, &str) = (".git/HEAD", "ref: refs/heads/main\n");
+
+/// Fake tools and fixture binaries always carry this suffix, on every operating system.
+/// Windows needs it to consider a file executable; Unix treats it as part of the name.
+pub const FIXTURE_SUFFIX: &str = ".exe";
+
+/// The readiness token `rune-testkit` prints before it blocks.
+pub const READY: &str = "READY";
+
 /// A shell that exists on Windows, macOS and Linux alike, so a script's observable
 /// behavior does not depend on which machine ran the test.
-const PINNED_SHELL: &str = "bash";
+///
+/// On Windows the plain name is not enough: the `bash.exe` shipped in `System32` is the
+/// Windows Subsystem for Linux launcher, which fails outright when no distribution is
+/// installed. Git for Windows is the bash that Windows developers and the CI runners both
+/// actually have.
+pub fn pinned_shell() -> PathBuf {
+  #[cfg(windows)]
+  {
+    let git_bash = PathBuf::from(r"C:\Program Files\Git\bin\bash.exe");
+    if git_bash.is_file() {
+      return git_bash;
+    }
+  }
+
+  PathBuf::from("bash")
+}
+
+/// Path to the binary cargo just built. Never a `rune` found on `PATH`.
+pub fn binary() -> PathBuf {
+  PathBuf::from(env!("CARGO_BIN_EXE_rune"))
+}
+
+/// The fixture binary the tests spawn as a child.
+///
+/// Cargo only exports `CARGO_BIN_EXE_*` for binaries of the crate under test, so it is
+/// located next to `rune` instead. It is a workspace member, which is what puts it there.
+pub fn testkit() -> PathBuf {
+  let path = binary().with_file_name(format!("rune-testkit{}", std::env::consts::EXE_SUFFIX));
+  assert!(path.is_file(), "{} is missing — build the whole workspace", path.display());
+  path
+}
 
 /// How one output stream is compared against what the test expects.
 enum Expect {
@@ -63,7 +107,7 @@ impl Default for Test {
 
 impl Test {
   pub fn new() -> Self {
-    Self {
+    let test = Self {
       dir: tempfile::tempdir().expect("create tempdir"),
       args: Vec::new(),
       env: Vec::new(),
@@ -72,12 +116,25 @@ impl Test {
       stdout: Expect::Literal(String::new()),
       stderr: Expect::Literal(String::new()),
       pin_shell: true,
-    }
+    };
+
+    test.file(BOUNDARY.0, BOUNDARY.1)
   }
 
   /// Writes `contents` to `rune.config.ts` in the test directory.
   pub fn config(self, contents: &str) -> Self {
     self.file("rune.config.ts", contents)
+  }
+
+  /// Puts a copy of the fixture binary at `relative`, as a fake tool named after whatever
+  /// the fixture's command calls.
+  pub fn tool(self, relative: &str) -> Self {
+    let path = self.dir.path().join(relative);
+    let parent = path.parent().expect("a fixture path always has a parent");
+    std::fs::create_dir_all(parent).expect("create fixture parent directories");
+    std::fs::copy(testkit(), &path).expect("copy the fixture binary");
+    make_executable(&path);
+    self
   }
 
   /// Writes an arbitrary fixture file, creating parent directories as needed.
@@ -153,61 +210,58 @@ impl Test {
 
   /// Runs the binary and compares all three outputs. Returns the raw output so a
   /// caller can assert more than the three standard expectations.
-  pub fn run(self) -> Output {
+  pub fn run(&self) -> Output {
     let output = self.spawn(self.dir.path());
-
-    let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
-    let stderr = String::from_utf8_lossy(&output.stderr).replace("\r\n", "\n");
-    let status = output.status.code();
-
-    let mut report = String::new();
-    // `|`, never `||`: every check must run so one mismatch cannot mask the others.
-    let ok = check_status(self.status, status, &mut report)
-      | check_stream("stdout", &self.stdout, &stdout, &mut report)
-      | check_stream("stderr", &self.stderr, &stderr, &mut report);
-
-    assert!(ok, "\nrune {}\n{report}", self.args.join(" "));
+    self.compare(&output, "");
 
     output
   }
 
   /// Runs the binary from `cwd` instead of the test root — for the nested-directory cases.
-  pub fn run_in(self, relative: &str) -> Output {
+  ///
+  /// Borrowing rather than consuming keeps the fixture alive, so a test can run the same
+  /// tree twice and then look at what the runs left behind.
+  pub fn run_in(&self, relative: &str) -> Output {
     let cwd = self.dir.path().join(relative);
     std::fs::create_dir_all(&cwd).expect("create working directory");
     let output = self.spawn(&cwd);
-
-    let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
-    let stderr = String::from_utf8_lossy(&output.stderr).replace("\r\n", "\n");
-    let status = output.status.code();
-
-    let mut report = String::new();
-    let ok = check_status(self.status, status, &mut report)
-      | check_stream("stdout", &self.stdout, &stdout, &mut report)
-      | check_stream("stderr", &self.stderr, &stderr, &mut report);
-
-    assert!(ok, "\nrune {} (in {relative})\n{report}", self.args.join(" "));
+    self.compare(&output, &format!(" (in {relative})"));
 
     output
   }
 
-  fn spawn(&self, cwd: &Path) -> Output {
+  fn compare(&self, output: &Output, where_from: &str) {
+    let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+    let stderr = String::from_utf8_lossy(&output.stderr).replace("\r\n", "\n");
+
+    let mut report = String::new();
+    // `&`, never `&&`: all three must hold, and all three must be evaluated, so one
+    // mismatch cannot hide the others behind it.
+    let ok = check_status(self.status, output.status.code(), &mut report)
+      & check_stream("stdout", &self.stdout, &stdout, &mut report)
+      & check_stream("stderr", &self.stderr, &stderr, &mut report);
+
+    assert!(ok, "\nrune {}{where_from}\n{report}", self.args.join(" "));
+  }
+
+  /// The invocation this test describes, without the piping `run` adds.
+  ///
+  /// For callers that need the child itself rather than its collected output: a PTY, a
+  /// signal, a console control event.
+  pub fn command(&self, cwd: &Path) -> Command {
     let mut command = Command::new(binary());
     command
       .current_dir(cwd)
       .args(&self.args)
-      .stdin(if self.stdin.is_some() { Stdio::piped() } else { Stdio::null() })
-      .stdout(Stdio::piped())
-      .stderr(Stdio::piped())
-      // Color must never depend on whether the runner attached a terminal, and `CI`
-      // is an input the config can read — leaving it inherited makes results differ
-      // between a laptop and a CI runner.
+      // Color must never depend on whether the runner attached a terminal, and `CI` is
+      // an input the config can read — leaving it inherited makes results differ between
+      // a laptop and a CI runner.
       .env("FORCE_COLOR", "0")
       .env_remove("NO_COLOR")
       .env_remove("CI");
 
     if self.pin_shell {
-      command.env("npm_config_script_shell", PINNED_SHELL);
+      command.env("npm_config_script_shell", pinned_shell());
     }
 
     for (key, value) in &self.env {
@@ -216,6 +270,16 @@ impl Test {
         None => command.env_remove(key),
       };
     }
+
+    command
+  }
+
+  fn spawn(&self, cwd: &Path) -> Output {
+    let mut command = self.command(cwd);
+    command
+      .stdin(if self.stdin.is_some() { Stdio::piped() } else { Stdio::null() })
+      .stdout(Stdio::piped())
+      .stderr(Stdio::piped());
 
     let Some(stdin) = self.stdin.as_ref() else {
       return command.output().expect("run the rune binary");
@@ -232,9 +296,45 @@ impl Test {
   }
 }
 
-/// Path to the binary cargo just built. Never a `rune` found on `PATH`.
-fn binary() -> PathBuf {
-  PathBuf::from(env!("CARGO_BIN_EXE_rune"))
+/// Blocks until `settled` reports true, or gives up after `limit`.
+///
+/// Only for an operating system event that offers nothing to wait on — a process tree
+/// finishing its own teardown, for instance. Never for synchronizing with a fixture:
+/// those announce themselves with [`READY`].
+pub fn wait_until(limit: std::time::Duration, settled: impl Fn() -> bool) -> bool {
+  let deadline = std::time::Instant::now() + limit;
+  while std::time::Instant::now() < deadline {
+    if settled() {
+      return true;
+    }
+    std::thread::yield_now();
+  }
+
+  settled()
+}
+
+/// Reads one line from a child's piped stdout — the readiness handshake every test that
+/// signals a running script begins with.
+pub fn read_ready(stdout: &mut std::process::ChildStdout) -> String {
+  use std::io::BufRead as _;
+
+  let mut line = String::new();
+  std::io::BufReader::new(stdout).read_line(&mut line).expect("read the readiness token");
+  assert!(line.starts_with(READY), "expected a readiness token, got {line:?}");
+  line
+}
+
+#[cfg(unix)]
+fn make_executable(path: &Path) {
+  use std::os::unix::fs::PermissionsExt as _;
+
+  std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755))
+    .expect("mark the fixture executable");
+}
+
+#[cfg(windows)]
+fn make_executable(_path: &Path) {
+  // Windows decides from the file extension, which is why every fixture ends in `.exe`.
 }
 
 fn check_status(expected: i32, actual: Option<i32>, report: &mut String) -> bool {

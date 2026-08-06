@@ -1,0 +1,11 @@
+---
+source: crates/rune-cli/tests/execution.rs
+expression: "String::from_utf8_lossy(&output.stderr).replace(\"\\r\\n\", \"\\n\")"
+---
+no script named `biuld`
+
+did you mean `build`?
+
+scripts defined here:
+  build
+  test
