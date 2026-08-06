@@ -11,11 +11,25 @@ repository = "https://github.com/giancarlosisasi/rune"
 
 
 [workspace.dependencies]
-clap = {version = "4", features = ["derive"]}
+clap = { version = "4", features = ["derive"] }
 rustc-hash = "2"
-rquickjs = "0.12"
-oxc = { version = "0.138.0", features = ["semantic", "transformer", "codegen"] }
+rquickjs = { version = "0.12", features = ["loader"] }
+# All oxc crates in one repo must move together; `=` keeps a patch bump from
+# splitting them. Bump with: cargo upgrade --package oxc --exclude-locked
+oxc = { version = "=0.138.0", features = ["semantic", "transformer", "codegen", "ast_visit"] }
+# Same repository as oxc, its own version line. The oxc facade does not re-export it,
+# and stack remapping needs the type, so it is pinned here and bumped with oxc.
+oxc_sourcemap = "=8.1.1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+blake3 = "1"
+dunce = "1"
+
 insta = "1"
+tempfile = "3"
+unindent = "0.2"
+regex = "1"
 
 [workspace.lints]
 

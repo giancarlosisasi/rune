@@ -15,3 +15,10 @@ workspace = true
 
 [dependencies]
 clap = { workspace = true }
+rune-config = { path = "../rune-config" }
+rune-out = { path = "../rune-out" }
+
+[dev-dependencies]
+regex = { workspace = true }
+tempfile = { workspace = true }
+unindent = { workspace = true }

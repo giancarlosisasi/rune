@@ -1,0 +1,44 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  # Locally a drifted snapshot is accepted through `cargo insta review`. Here there is
+  # nobody to review it, so silent acceptance would turn every snapshot test into a
+  # test that cannot fail.
+  INSTA_UPDATE: "no"
+
+jobs:
+  check:
+    name: ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      # Windows is the development machine, so Linux and macOS are the untested halves.
+      # One of them breaking must not hide the other.
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v7
+
+      # rust-toolchain.toml pins the channel and the components, so rustup installs
+      # exactly what a developer has locally. No version is named twice.
+      - uses: Swatinem/rust-cache@v2
+
+      - uses: taiki-e/install-action@nextest
+
+      # These two lines are byte-identical to the `just lint` recipe. A green local
+      # lint has to mean a green CI lint.
+      - run: cargo fmt --all --check
+      - run: cargo clippy --workspace --all-targets -- --deny warnings
+
+      - run: cargo nextest run --workspace --profile ci
+      - run: cargo test --workspace --doc

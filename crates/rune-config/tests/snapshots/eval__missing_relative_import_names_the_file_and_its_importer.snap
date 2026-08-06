@@ -1,0 +1,11 @@
+---
+source: crates/rune-config/tests/eval.rs
+description: missing relative import
+expression: "redact(dir.path(), &error)"
+---
+cannot find `./nope` imported from [TMP]/rune.config.ts
+
+tried:
+  [TMP]/nope
+  [TMP]/nope.ts
+  [TMP]/nope/index.ts

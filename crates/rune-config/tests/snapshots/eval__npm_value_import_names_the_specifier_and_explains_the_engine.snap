@@ -1,0 +1,13 @@
+---
+source: crates/rune-config/tests/eval.rs
+description: npm value import
+expression: "redact(dir.path(), &error)"
+---
+cannot import `lodash` from [TMP]/rune.config.ts
+
+rune evaluates this config with an embedded JavaScript engine, so npm packages and Node built-in modules do not exist at runtime.
+
+what does work:
+  - `import type { ... } from "lodash"` — type-only imports are erased before evaluation
+  - a relative import of a file in this repository, such as `./scripts/helpers.ts`
+  - the `rune` global: `rune.env`, `rune.platform`, `rune.isCI`

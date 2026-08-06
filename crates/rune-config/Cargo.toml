@@ -11,7 +11,14 @@ workspace = true
 
 [dependencies]
 oxc = { workspace = true }
+oxc_sourcemap = { workspace = true }
+rquickjs = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+dunce = { workspace = true }
+blake3 = { workspace = true }
 
 [dev-dependencies]
-rquickjs = { workspace = true }
 insta = { workspace = true }
+tempfile = { workspace = true }

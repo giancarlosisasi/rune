@@ -2,6 +2,8 @@ use std::process::ExitCode;
 
 use clap::{Parser, Subcommand};
 
+mod list;
+
 #[derive(Parser)]
 #[command(name = "rune", version, about = "Centralized script runner for JS/TS monorepos")]
 struct Cli {
@@ -17,19 +19,38 @@ enum Command {
   List,
   /// Show how a script resolves and where it comes from
   Inspect { name: String },
+  /// Manage the resolved-config cache
+  Cache {
+    #[command(subcommand)]
+    command: CacheCommand,
+  },
 }
 
-#[expect(clippy::print_stderr, reason = "temporary stubs until output goes through rune-out")]
+#[derive(Subcommand)]
+enum CacheCommand {
+  /// Remove every cached config result
+  Clear,
+}
+
 fn main() -> ExitCode {
   let cli = Cli::parse();
 
-  match cli.command {
-    Command::Run { name } => eprintln!("run {name}: not implemented yet"),
-    Command::List => eprintln!("rune rune list: not implemented yet"),
-    Command::Inspect { name } => eprintln!("rune inspect {name}: not implemented yet"),
-  }
+  let outcome = match cli.command {
+    Command::List => list::run(),
+    Command::Cache { command: CacheCommand::Clear } => list::clear_cache(),
+    Command::Run { name } => Err(format!("run {name}: not implemented yet")),
+    Command::Inspect { name } => Err(format!("inspect {name}: not implemented yet")),
+  };
 
-  ExitCode::FAILURE
+  match outcome {
+    Ok(()) => ExitCode::SUCCESS,
+    Err(message) => {
+      // Never stdout: a diagnostic on stdout would be indistinguishable from a script's
+      // own output once `run` starts spawning children.
+      rune_out::diagnostic(&message);
+      ExitCode::FAILURE
+    }
+  }
 }
 
 #[cfg(test)]
