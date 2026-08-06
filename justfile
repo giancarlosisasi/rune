@@ -22,3 +22,12 @@ lint:
 fix:
   cargo fmt --all
   cargo clippy --workspace --all-targets --fix --allow-dirty --allow-staged
+
+# Serve the documentation site with hot reload
+docs:
+  pnpm --filter rune-website dev
+
+# Type-check and build the documentation site, as CI will
+docs-build:
+  pnpm --filter rune-website typecheck
+  pnpm --filter rune-website build
