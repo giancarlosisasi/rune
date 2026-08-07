@@ -1,7 +1,7 @@
 import path from 'node:path';
 import { defineConfig, type UserConfig } from '@rspress/core';
 
-const SITE_URL = 'https://rune.giancarlosisasi.dev';
+const SITE_URL = 'https://rune.gio-labs.com';
 const AUTHOR_URL = 'https://github.com/giancarlosio';
 const REPO_URL = 'https://github.com/giancarlosio/rune';
 
@@ -48,6 +48,7 @@ const config: UserConfig = {
     globalComponents: [
       path.resolve(__dirname, 'theme/components/Cards.tsx'),
       path.resolve(__dirname, 'theme/components/Card.tsx'),
+      path.resolve(__dirname, 'theme/components/PackageManagerTabs.tsx'),
     ],
   },
   route: {

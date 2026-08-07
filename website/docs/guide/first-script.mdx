@@ -40,10 +40,14 @@ This line is the last edit that file needs for this script. Flags change at the 
 
 ## 3. Run it
 
-```bash
-cd packages/api
-pnpm test
-```
+From inside `packages/api`:
+
+<PackageManagerTabs command={{
+  npm: 'npm run test',
+  yarn: 'yarn test',
+  pnpm: 'pnpm test',
+  bun: 'bun run test',
+}} />
 
 Rune walks up from `packages/api` looking for `rune.config.ts`, stopping at the first directory
 containing `.git`. It records two directories from that walk:
@@ -77,9 +81,12 @@ is on [Exit codes](/reference/exit-codes).
 Everything after `--` is appended to the resolved command, quoted per element for the shell that
 will receive it.
 
-```bash
-pnpm test -- --watch
-```
+<PackageManagerTabs command={{
+  npm: 'npm run test -- --watch',
+  yarn: 'yarn test --watch',
+  pnpm: 'pnpm test -- --watch',
+  bun: 'bun run test -- --watch',
+}} />
 
 ## When the name is wrong
 

@@ -2,6 +2,8 @@
   { "type": "file", "name": "index", "label": "Overview" },
   "installation",
   "first-script",
+  "several-scripts",
+  "flaky-and-slow-scripts",
   "monorepo-adoption",
   "task-runners"
 ]

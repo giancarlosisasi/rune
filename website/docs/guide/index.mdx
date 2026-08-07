@@ -1,17 +1,13 @@
 ---
 title: 'Overview'
-description: 'What Rune is, the four pieces it is made of, and where to start reading.'
+description: 'What Rune is, the four pieces it is made of, what it deliberately leaves out, and where to start reading.'
 ---
 
 # Overview
 
-Rune is a script runner for JavaScript and TypeScript monorepos. Commands are declared once in
-a `rune.config.ts` at the repository root. Each package's `package.json` references a command by
+Rune is a script runner for JavaScript and TypeScript monorepos. Commands are declared once in a
+`rune.config.ts` at the repository root. Each package's `package.json` references a command by
 name, so changing a flag is one edit at the root instead of one edit per package.
-
-Rune is a script registry and a runner. It does not build a task graph, cache task results, or
-order tasks by dependency. Turborepo and Nx keep doing that, and they call `rune run …`
-underneath.
 
 ## The four pieces
 
@@ -22,6 +18,21 @@ underneath.
 | The runner | Spawns the command through the platform shell, hands it the terminal, and reports its exit code |
 | The cache | Stores the resolved config keyed by the content of its whole import graph |
 
+## Scope
+
+Rune is a script registry and a runner. Within one package it can order scripts, run them side by
+side, retry them and time them out. It does not do the things a build system does:
+
+| Not in Rune | Why |
+| --- | --- |
+| Task result caching | Rune has no model of a task's inputs or outputs. It caches only its own resolved config |
+| Ordering across packages | Rune reads no dependency graph between packages |
+| Remote execution | Out of scope |
+| Watch mode | The tool being run already has one |
+
+A repository that needs those keeps the build system it already has, and points it at Rune. The
+setup for that is on [Turborepo and Nx](/guide/task-runners).
+
 ## Reading order
 
 <Cards>
@@ -31,11 +42,17 @@ underneath.
   <Card title="Your first script" href="/guide/first-script">
     One command, run from a package five directories down.
   </Card>
+  <Card title="Running several scripts" href="/guide/several-scripts">
+    Chain scripts, run them side by side, or put a prerequisite in front of one.
+  </Card>
+  <Card title="Flaky and slow scripts" href="/guide/flaky-and-slow-scripts">
+    Retries for intermittent failures, time limits for processes that hang.
+  </Card>
   <Card title="Adopting Rune in a monorepo" href="/guide/monorepo-adoption">
     Move existing package.json scripts into one config, package by package.
   </Card>
   <Card title="Turborepo and Nx" href="/guide/task-runners">
-    The one configuration change a task runner needs when Rune arrives.
+    The one configuration change a build system needs when Rune arrives.
   </Card>
 </Cards>
 

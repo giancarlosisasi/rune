@@ -328,6 +328,42 @@ html:root {
   font-size: 0.88em;
 }
 
+/* Tabs — the selected one is marked by a brand underline, not a raised pill. */
+.rp-tabs {
+  border-radius: 0;
+}
+
+.rp-tabs__label {
+  gap: 4px;
+  padding: 0 8px;
+}
+
+.rp-tabs__label__item {
+  border-radius: 0;
+  margin-right: 0;
+  padding: 10px 12px;
+  border-bottom: 2px solid transparent;
+  font-family: var(--rp-font-family-mono);
+  font-size: 13px;
+}
+
+.rp-tabs__label__item--not-selected:hover {
+  background-color: var(--rune-bg-selected);
+  color: var(--rune-text-primary);
+}
+
+.rp-tabs__label__item--selected {
+  background-color: transparent;
+  box-shadow: none;
+  color: var(--rune-brand);
+  border-bottom-color: var(--rune-brand);
+  font-weight: 600;
+}
+
+.rp-page-tabs__label__item {
+  border-radius: 0;
+}
+
 /* ---------------------------------------------------------------- callouts */
 
 .rp-callout {

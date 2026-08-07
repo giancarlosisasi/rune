@@ -9,30 +9,24 @@ Rune installs as a development dependency at the root of the repository. The pac
 native binary for the current platform through optional dependencies, so nothing is compiled and
 no postinstall script runs.
 
-```bash
-pnpm add -D @giancarlosio/rune
-```
-
-```bash
-npm install --save-dev @giancarlosio/rune
-```
-
-```bash
-yarn add -D @giancarlosio/rune
-```
-
-```bash
-bun add -d @giancarlosio/rune
-```
+<PackageManagerTabs command={{
+  npm: 'npm install --save-dev @giancarlosio/rune',
+  yarn: 'yarn add -D @giancarlosio/rune',
+  pnpm: 'pnpm add -D @giancarlosio/rune',
+  bun: 'bun add -d @giancarlosio/rune',
+}} />
 
 Install it once, at the workspace root. Packages call the binary through `node_modules/.bin`,
 which every package manager links for the whole workspace.
 
 ## Verifying the install
 
-```bash
-pnpm rune --version
-```
+<PackageManagerTabs command={{
+  npm: 'npx rune --version',
+  yarn: 'yarn rune --version',
+  pnpm: 'pnpm rune --version',
+  bun: 'bun rune --version',
+}} />
 
 The version printed here is the version of the native binary, not the wrapper package. They are
 released together and always match.
@@ -42,9 +36,12 @@ released together and always match.
 `rune init` writes a starter config next to the nearest `package.json`, with the fields commented.
 It refuses to overwrite an existing file.
 
-```bash
-pnpm rune init
-```
+<PackageManagerTabs command={{
+  npm: 'npx rune init',
+  yarn: 'yarn rune init',
+  pnpm: 'pnpm rune init',
+  bun: 'bun rune init',
+}} />
 
 The result:
 

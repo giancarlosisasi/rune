@@ -1,0 +1,90 @@
+---
+title: 'Flaky and slow scripts'
+description: 'Retry a script that fails intermittently, put a time limit on one that can hang, and control how a script is terminated.'
+---
+
+# Flaky and slow scripts
+
+Two options cover the cases that waste the most CI time: a test that fails once and passes on the
+retry, and a process that hangs until the job times out an hour later.
+
+## A test that fails intermittently
+
+```ts title="rune.config.ts"
+'test:network': {
+  command: 'vitest run tests/network',
+  retries: 2,
+  retryDelay: 'exponential',
+}
+```
+
+Three attempts at most. `'exponential'` waits `2^attempt` seconds, so 2 s before the second attempt
+and 4 s before the third. A plain number is a fixed wait in milliseconds.
+
+Retries happen only on failure, so a passing script runs once.
+
+The part worth knowing: **anything watching the script sees only the final attempt.** The reported
+exit code, a group's failure handling and a success policy all read one result. A script that fails
+twice and then passes is a success, not three events.
+
+:::warning
+A retry hides a real defect as easily as it absorbs a flaky network. Put `retries` on the narrowest
+script that needs it, never on the whole suite.
+:::
+
+## A process that can hang
+
+```ts title="rune.config.ts"
+e2e: {
+  command: 'playwright test',
+  timeout: 600000,
+}
+```
+
+When the budget elapses, Rune terminates the whole process tree and exits **124**, the same code
+GNU `timeout` uses:
+
+```
+error: `e2e` exceeded its 600000 ms timeout — process tree terminated
+```
+
+A script that finishes inside its budget is untouched. No early termination, no altered code.
+
+## Both together
+
+Each attempt gets a fresh budget, so this is four attempts of up to 30 seconds each, not 30 seconds
+in total. A timed-out attempt counts as a retryable failure.
+
+```ts
+'deploy:smoke': {
+  command: 'node scripts/smoke.mjs',
+  timeout: 30000,
+  retries: 3,
+}
+```
+
+## Letting a server clean up
+
+`killSignal` and `killTimeout` describe how Rune terminates a script it decided to stop, whether
+from a timeout or from a failing sibling in a parallel group.
+
+```ts
+'dev:api': {
+  command: 'node --watch server.js',
+  killSignal: 'SIGINT',
+  killTimeout: 2000,
+}
+```
+
+A server that closes its connections on `SIGINT` gets two seconds to do it before Rune escalates to
+`SIGKILL`.
+
+This does not apply to Ctrl+C from the terminal. That interrupt reaches the child directly and Rune
+simply waits for it. See [Exit codes](/reference/exit-codes).
+
+## Where these belong
+
+On `command` and `extends` scripts, single or grouped. A group entry that declares one is a
+validation error, because a group is not a process. Put them on the members.
+
+The full field list is in [Timeouts and retries](/config/lifecycle).

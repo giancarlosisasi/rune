@@ -1,0 +1,102 @@
+---
+title: 'Running several scripts'
+description: 'Chain scripts in order with a serial group, run them side by side with a parallel group, and put prerequisites in front of a single script.'
+---
+
+# Running several scripts
+
+Three shapes cover almost everything: a chain that stops at the first failure, a set that runs side
+by side, and a prerequisite in front of a single script.
+
+## A chain that stops at the first failure
+
+The CI shape. Members run one at a time, in order, and the first failure ends the run with its own
+exit code.
+
+```ts title="rune.config.ts"
+export default defineConfig({
+  scripts: {
+    build: { command: 'tsc --build' },
+    test: { command: 'vitest run --reporter=dot' },
+    lint: { command: 'biome check .' },
+
+    ci: {
+      serial: ['build', 'test', 'lint'],
+      description: 'Build, then test, then lint',
+    },
+  },
+});
+```
+
+```
+$ rune run ci
+[build] compiled 14 packages in 3.2 s
+[test]  41 passed, 41 total
+error: script `ci` failed at member `test` (exit 1)
+       later members did not start: lint
+```
+
+Only one process runs at a time, so each member has the terminal to itself and interactive tools
+behave normally.
+
+## A set that runs side by side
+
+The dev-server shape. Output is prefixed with the member that wrote it, in a colour that stays the
+same for the whole run.
+
+```ts title="rune.config.ts"
+export default defineConfig({
+  scripts: {
+    'dev:api': { command: 'tsx watch src/main.ts' },
+    'dev:web': { command: 'vite' },
+
+    dev: {
+      parallel: ['dev:api', 'dev:web'],
+      description: 'Serve the API and the web app',
+    },
+  },
+});
+```
+
+```
+$ rune run dev
+[dev:api]  listening on http://localhost:4000
+[dev:web]  vite v6.0.1  ready in 412 ms
+[dev:web]  ➜ Local:   http://localhost:5173/
+[dev:api]  Error: ECONNREFUSED 127.0.0.1:5432
+error: member `dev:api` exited 1 — stopping `dev:web`
+```
+
+One member failing stops the others by default, so a broken API does not leave a web server running
+against nothing. `continueOnError: true` lets them all finish.
+
+## A prerequisite in front of one script
+
+When the ordering belongs to a single script rather than to a new name, use `dependsOn`. It runs the
+listed scripts serially first, and a failure stops the run.
+
+```ts
+test: {
+  command: 'vitest run',
+  dependsOn: ['codegen'],
+}
+```
+
+There is no `pre` and `post` naming convention. A script that needs something first says so.
+
+## Choosing between them
+
+| Want | Use |
+| --- | --- |
+| A named sequence others will run, such as `ci` | `serial` |
+| Several long-running processes at once | `parallel` |
+| One or two prerequisites for a single script | `dependsOn` |
+| Ordering that follows the package dependency graph | A task runner. See [Turborepo and Nx](/guide/task-runners) |
+
+Groups nest. A `parallel` group can list a `serial` group as a member, which is how a build sequence
+runs alongside a watcher.
+
+## Next
+
+[Flaky and slow scripts](/guide/flaky-and-slow-scripts) adds retries and time limits to the members.
+The full field list for both group kinds is in [Groups](/config/groups).

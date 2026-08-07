@@ -13,10 +13,14 @@ rest alone for as long as it likes.
 `rune init --from-package-json` reads the nearest `package.json` and writes one command script per
 entry in its `scripts` field. Start from the package whose scripts are the most copied.
 
-```bash
-cd packages/api
-pnpm rune init --from-package-json
-```
+From inside `packages/api`:
+
+<PackageManagerTabs command={{
+  npm: 'npx rune init --from-package-json',
+  yarn: 'yarn rune init --from-package-json',
+  pnpm: 'pnpm rune init --from-package-json',
+  bun: 'bun rune init --from-package-json',
+}} />
 
 Move the generated file to the repository root, then delete the entries that are genuinely local to
 one package. What remains is the shared set.
@@ -63,19 +67,26 @@ name.
 
 ## Checking what a package resolves to
 
-```bash
-cd packages/legacy
-pnpm rune inspect test
-```
+From inside `packages/legacy`:
+
+<PackageManagerTabs command={{
+  npm: 'npx rune inspect test',
+  yarn: 'yarn rune inspect test',
+  pnpm: 'pnpm rune inspect test',
+  bun: 'bun rune inspect test',
+}} />
 
 `inspect` prints the resolved command, the working directory, the environment delta and the chain
 of definitions that produced them. It never spawns anything.
 
 ## Verifying the whole repository
 
-```bash
-pnpm -r exec rune list
-```
+<PackageManagerTabs command={{
+  npm: 'npm exec --workspaces -- rune list',
+  yarn: 'yarn workspaces foreach -A exec rune list',
+  pnpm: 'pnpm -r exec rune list',
+  bun: 'bun run --filter "*" rune list',
+}} />
 
 Each package prints the scripts visible to it, with `(overridden here)` next to the ones its own
 config sharpens.
