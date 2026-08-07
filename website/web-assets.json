@@ -1,0 +1,37 @@
+{
+  "siteUrl": "https://rune.gio-labs.com",
+  "outDir": "docs/public",
+  "mark": "brand/mark.svg",
+  "icon": {
+    "background": "#243F9E",
+    "mark": "#FCFBF9",
+    "scale": 0.86
+  },
+  "logo": {
+    "light": "#14181D",
+    "dark": "#E6EAEE"
+  },
+  "themeColor": {
+    "light": "#F5F3EF",
+    "dark": "#0F1215"
+  },
+  "card": {
+    "title": "rune",
+    "tagline": "Script runner for JavaScript and TypeScript monorepos",
+    "alt": "The runic letter raido above the wordmark rune, on a dark field.",
+    "background": "#0F1215",
+    "mark": "#E6EAEE",
+    "rule": "#8FA8FF",
+    "text": "#E6EAEE",
+    "subtext": "#8E98A2",
+    "fontFamily": "Segoe UI, Inter, Helvetica Neue, Helvetica, Arial, sans-serif",
+    "markSize": 213
+  },
+  "manifest": {
+    "name": "Rune",
+    "short_name": "rune",
+    "description": "A script runner for JavaScript and TypeScript monorepos. Define a command once, reference it by name from every package.",
+    "start_url": "/",
+    "display": "minimal-ui"
+  }
+}
