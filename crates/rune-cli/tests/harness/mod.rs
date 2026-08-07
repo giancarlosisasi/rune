@@ -244,15 +244,37 @@ impl Test {
     assert!(ok, "\nrune {}{where_from}\n{report}", self.args.join(" "));
   }
 
+  /// Runs the binary again in the same fixture, with other arguments, and hands back
+  /// the raw output.
+  ///
+  /// The three expectations describe the run under test, so this one is judged by the
+  /// caller. It exists for the case where one command's product is another command's
+  /// input: `init` writes a config, and only the loader can say whether it wrote one.
+  pub fn then_run(&self, args: &[&str]) -> Output {
+    let owned: Vec<String> = args.iter().map(|argument| (*argument).to_owned()).collect();
+
+    self
+      .command_with(self.dir.path(), &owned)
+      .stdin(Stdio::null())
+      .stdout(Stdio::piped())
+      .stderr(Stdio::piped())
+      .output()
+      .expect("run the rune binary")
+  }
+
   /// The invocation this test describes, without the piping `run` adds.
   ///
   /// For callers that need the child itself rather than its collected output: a PTY, a
   /// signal, a console control event.
   pub fn command(&self, cwd: &Path) -> Command {
+    self.command_with(cwd, &self.args)
+  }
+
+  fn command_with(&self, cwd: &Path, args: &[String]) -> Command {
     let mut command = Command::new(binary());
     command
       .current_dir(cwd)
-      .args(&self.args)
+      .args(args)
       // Color must never depend on whether the runner attached a terminal, and `CI` is
       // an input the config can read — leaving it inherited makes results differ between
       // a laptop and a CI runner.

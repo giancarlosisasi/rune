@@ -57,6 +57,25 @@ impl Discovered {
   }
 }
 
+/// The nearest `package.json` at or above `start`, within the repository boundary.
+///
+/// The same walk `discover` makes, so `rune init` seeds from the package the loader
+/// would later call this script's home.
+pub fn nearest_package_json(start: &Path) -> Option<PathBuf> {
+  for directory in start.ancestors() {
+    let candidate = directory.join(PACKAGE_FILE);
+    if candidate.is_file() {
+      return Some(candidate);
+    }
+
+    if directory.join(BOUNDARY).exists() {
+      break;
+    }
+  }
+
+  None
+}
+
 /// Walks up from `start` looking for configs, stopping at a `.git` or the filesystem root.
 pub fn discover(start: &Path) -> Result<Discovered, NotFound> {
   let started_from = start.to_path_buf();

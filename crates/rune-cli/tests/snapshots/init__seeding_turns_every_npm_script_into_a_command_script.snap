@@ -1,0 +1,38 @@
+---
+source: crates/rune-cli/tests/init.rs
+description: "three npm scripts: a plain one, a name that is not an identifier, and a command carrying quotes"
+expression: generated
+---
+// Scripts for this repository, taken from package.json one for one. Every package runs
+// them with `rune run <name>`.
+//
+// Where several of these repeat the same command, keep one and let the others `extends`
+// it. That duplication is what rune exists to remove.
+//
+// A script either runs a `command` of its own, or `extends` another one and adds to it:
+//
+//   build:    { command: "tsc -b" }
+//   build:ci: { extends: "build", appendArgs: ["--force"] }
+//
+// A `command` may instead name one per operating system, with a `default` for the rest:
+//
+//   clean: { command: { default: "rm -rf dist", win32: "rmdir /s /q dist" } }
+//
+// Any script may add `description`, `cwd`, `env` and `envFile`.
+//
+// This file is TypeScript: variables, template strings and relative imports all work.
+// `rune.env`, `rune.platform` and `rune.isCI` are available. Node globals are not.
+
+export default {
+  scripts: {
+    build: {
+      command: "tsc -b",
+    },
+    lint: {
+      command: "eslint \"src/**/*.ts\"",
+    },
+    "test:ci": {
+      command: "vitest run --reporter=dot",
+    },
+  },
+};

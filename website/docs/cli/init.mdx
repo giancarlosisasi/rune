@@ -9,8 +9,8 @@ description: 'Write a commented starter rune.config.ts, optionally seeded from t
 rune init [--from-package-json]
 ```
 
-Writes `rune.config.ts` in the current directory. It refuses to overwrite an existing file and
-exits 1 when one is there.
+Writes `rune.config.ts` in the current directory and reports the path it wrote on standard error.
+It refuses to overwrite an existing file and exits 1 when one is there.
 
 ## A fresh config
 
@@ -19,29 +19,37 @@ rune init
 ```
 
 ```ts title="rune.config.ts"
-import { defineConfig } from '@giancarlosio/rune';
+// Scripts for this repository. Every package runs them with `rune run <name>`, so a
+// shared command changes here once instead of in every package.json.
+//
+// A script either runs a `command` of its own, or `extends` another one and adds to it:
+//
+//   build:    { command: "tsc -b" }
+//   build:ci: { extends: "build", appendArgs: ["--force"] }
+//
+// A `command` may instead name one per operating system, with a `default` for the rest:
+//
+//   clean: { command: { default: "rm -rf dist", win32: "rmdir /s /q dist" } }
+//
+// Any script may add `description`, `cwd`, `env` and `envFile`.
+//
+// This file is TypeScript: variables, template strings and relative imports all work.
+// `rune.env`, `rune.platform` and `rune.isCI` are available. Node globals are not.
 
-export default defineConfig({
+export default {
   scripts: {
-    // Every script is one entry. `command` is handed to the platform shell,
-    // so pipes, && and redirection all work.
-    build: {
-      command: 'tsc --build',
-      description: 'Compile every package',
-    },
-
-    // A package can sharpen this one without editing its package.json:
-    //   packages/legacy/rune.config.ts
-    //   test: { extends: 'test', appendArgs: ['--maxWorkers=1'] }
-    test: {
-      command: 'vitest run',
-      description: 'Run unit tests',
+    hello: {
+      command: "echo rune is set up",
+      description: "Check that rune can run a script",
     },
   },
-});
+};
 ```
 
-The generated file loads through the normal pipeline. `rune list` works immediately after `init`.
+The comments are half the file: they name every field the version that wrote it accepts.
+
+The generated file loads through the normal pipeline. `rune list` and `rune run hello` both work
+immediately after `init`.
 
 ## Seeding from package.json
 
@@ -58,28 +66,37 @@ Given:
 {
   "scripts": {
     "build": "tsc --build",
-    "test": "vitest run --coverage",
+    "test:ci": "vitest run --coverage",
     "dev": "tsx watch src/main.ts"
   }
 }
 ```
 
-The result:
+The result, under the same comment header:
 
 ```ts title="rune.config.ts"
-import { defineConfig } from '@giancarlosio/rune';
-
-export default defineConfig({
+export default {
   scripts: {
-    build: { command: 'tsc --build' },
-    dev: { command: 'tsx watch src/main.ts' },
-    test: { command: 'vitest run --coverage' },
+    build: {
+      command: "tsc --build",
+    },
+    dev: {
+      command: "tsx watch src/main.ts",
+    },
+    "test:ci": {
+      command: "vitest run --coverage",
+    },
   },
-});
+};
 ```
 
-Scripts are written sorted by name. Descriptions are left out, because `package.json` has nowhere
-to put one.
+Scripts are written sorted by name, and a name that is not an identifier is quoted. Descriptions
+are left out, because `package.json` has nowhere to put one.
+
+The translation is mechanical on purpose. Rune does not try to spot commands that repeat across
+packages and fold them into `extends` chains: guessing which duplicates were intentional would
+leave you auditing the result line by line. Rune puts everything in one file; the factoring
+is yours.
 
 Move the file to the repository root and delete the entries that belong to one package only. What
 remains is the shared set. [Adopting Rune in a monorepo](/guide/monorepo-adoption) covers the rest.

@@ -3,6 +3,7 @@ use std::process::ExitCode;
 use clap::{Parser, Subcommand};
 use rune_config::inherit::Scope;
 
+mod init;
 mod inspect;
 mod list;
 mod run;
@@ -36,6 +37,12 @@ enum Command {
     #[arg(long)]
     root: bool,
   },
+  /// Write a starter rune.config.ts in the current directory
+  Init {
+    /// Seed the starter with the scripts from the nearest package.json
+    #[arg(long)]
+    from_package_json: bool,
+  },
   /// Manage the resolved-config cache
   Cache {
     #[command(subcommand)]
@@ -65,6 +72,7 @@ fn main() -> ExitCode {
       Err(message) => fail(&message),
     },
     Command::List => report(list::run()),
+    Command::Init { from_package_json } => report(init::run(from_package_json)),
     Command::Cache { command: CacheCommand::Clear } => report(list::clear_cache()),
     Command::Inspect { name, root } => report(inspect::run(&name, scope(root))),
   }

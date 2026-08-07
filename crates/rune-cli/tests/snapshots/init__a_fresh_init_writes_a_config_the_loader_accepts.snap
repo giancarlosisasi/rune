@@ -1,0 +1,30 @@
+---
+source: crates/rune-cli/tests/init.rs
+description: "the starter config, written into an empty directory"
+expression: generated
+---
+// Scripts for this repository. Every package runs them with `rune run <name>`, so a
+// shared command changes here once instead of in every package.json.
+//
+// A script either runs a `command` of its own, or `extends` another one and adds to it:
+//
+//   build:    { command: "tsc -b" }
+//   build:ci: { extends: "build", appendArgs: ["--force"] }
+//
+// A `command` may instead name one per operating system, with a `default` for the rest:
+//
+//   clean: { command: { default: "rm -rf dist", win32: "rmdir /s /q dist" } }
+//
+// Any script may add `description`, `cwd`, `env` and `envFile`.
+//
+// This file is TypeScript: variables, template strings and relative imports all work.
+// `rune.env`, `rune.platform` and `rune.isCI` are available. Node globals are not.
+
+export default {
+  scripts: {
+    hello: {
+      command: "echo rune is set up",
+      description: "Check that rune can run a script",
+    },
+  },
+};

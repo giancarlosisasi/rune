@@ -18,6 +18,7 @@ clap = { workspace = true }
 rune-config = { path = "../rune-config" }
 rune-exec = { path = "../rune-exec" }
 rune-out = { path = "../rune-out" }
+serde_json = { workspace = true }
 
 [dev-dependencies]
 insta = { workspace = true }
