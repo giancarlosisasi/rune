@@ -10,6 +10,7 @@ repository.workspace = true
 workspace = true
 
 [dependencies]
+rune-out = { path = "../rune-out" }
 thiserror = { workspace = true }
 
 [target.'cfg(unix)'.dependencies]

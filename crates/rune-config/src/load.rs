@@ -15,6 +15,7 @@ use thiserror::Error;
 use crate::cache::{self, Cache};
 use crate::discover::{Discovered, NotFound, discover};
 use crate::env::Environment;
+use crate::envfile::EnvFileError;
 use crate::eval::{EvalError, Evaluated, evaluate_config};
 use crate::inherit::{self, InheritError, Layer, Resolved, Scope};
 use crate::paths::relative_to;
@@ -43,6 +44,9 @@ pub enum LoadError {
 
   #[error(transparent)]
   Inherit(#[from] InheritError),
+
+  #[error(transparent)]
+  EnvFile(#[from] EnvFileError),
 }
 
 /// Where a script's definition came from, seen from the directory rune was run in.
@@ -169,9 +173,12 @@ pub fn load(start: &Path, environment: &Environment) -> Result<Loaded, LoadError
     .iter()
     .zip(values)
     .map(|(source, value)| {
-      parse(&value).map(|config| Layer { source: source.clone(), config }).map_err(|error| {
-        LoadError::Schema { path_display: source.display().to_string(), source: error }
-      })
+      let config = parse(&value).map_err(|error| LoadError::Schema {
+        path_display: source.display().to_string(),
+        source: error,
+      })?;
+
+      Ok(Layer::new(&discovered.root, source.clone(), config)?)
     })
     .collect::<Result<Vec<Layer>, LoadError>>()?;
 

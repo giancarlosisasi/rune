@@ -16,10 +16,11 @@ use rune_config::env::PLATFORM;
 use rune_config::inherit::{Resolved, Scope};
 use rune_config::load::Loaded;
 use rune_config::paths::relative_to;
+use rune_exec::environment::{self, Descriptor, Layering};
 use rune_exec::quote::command_line;
 use rune_exec::shell::{SHELL_VARIABLE, Shell};
 
-use crate::script::{load_here, unknown};
+use crate::script::{env_files, load_here, unknown};
 
 /// Prints the resolution of `name`: what runs, where, with what, and how that was reached.
 pub fn run(name: &str, scope: Scope) -> Result<(), String> {
@@ -49,9 +50,17 @@ fn render(name: &str, resolved: &Resolved<'_>, loaded: &Loaded) -> String {
     relative_to(root, &directory(resolved, loaded))
   );
 
-  for (position, (key, value)) in resolved.env.iter().enumerate() {
+  let layering = layered(name, resolved, loaded);
+  for (position, (key, value)) in layering.applied.iter().enumerate() {
     let label = if position == 0 { "environment" } else { "" };
     let _ = writeln!(report, "{label:<LABEL$}  {key}={value}");
+  }
+
+  // Separately, and always: a delta showing only what got through cannot tell a user that
+  // the file they just edited had no effect.
+  for (position, ignored) in layering.ignored.iter().enumerate() {
+    let label = if position == 0 { "ignored" } else { "" };
+    let _ = writeln!(report, "{label:<LABEL$}  {ignored}");
   }
 
   report.push_str("\nresolved through\n");
@@ -72,6 +81,25 @@ fn render(name: &str, resolved: &Resolved<'_>, loaded: &Loaded) -> String {
   }
 
   report.trim_end().to_owned()
+}
+
+/// The environment `run` would build, worked out without running anything.
+///
+/// The same function `run` uses, against the same process environment, so what the report
+/// calls ignored is exactly what the run would drop.
+fn layered(name: &str, resolved: &Resolved<'_>, loaded: &Loaded) -> Layering {
+  let files = env_files(resolved);
+
+  environment::build(
+    std::env::vars_os(),
+    &Descriptor {
+      script_name: name,
+      root: &loaded.discovered.root,
+      package_dir: &loaded.discovered.package_dir,
+      env: &resolved.env,
+      env_files: &files,
+    },
+  )
 }
 
 /// The command line the shell would be handed, quoted the way that shell reads it.

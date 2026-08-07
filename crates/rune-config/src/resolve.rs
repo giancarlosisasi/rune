@@ -109,7 +109,7 @@ fn append_extension(path: &Path) -> PathBuf {
 
 /// Collapses `.` and `..` without touching the filesystem, so a candidate that does not
 /// exist is still named as a path the user can go and look for.
-fn lexically_normalize(path: &Path) -> PathBuf {
+pub fn lexically_normalize(path: &Path) -> PathBuf {
   let mut normalized = PathBuf::new();
   for component in path.components() {
     match component {

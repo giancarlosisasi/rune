@@ -1,0 +1,6 @@
+---
+source: crates/rune-cli/tests/env_files.rs
+description: a file assigning a variable the environment already has
+expression: stderr_of(&output)
+---
+warning: `CI` from `.env` was ignored: the process environment already sets it

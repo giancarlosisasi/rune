@@ -23,6 +23,10 @@ oxc_sourcemap = "=8.1.1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"
+# Quoting, escapes, comments and multi-line values in dotenv files. The iterator API is
+# the one rune uses: a whole-file load would mutate rune's own process environment, and
+# every assignment has to be inspected before it is applied.
+dotenvy = "0.15"
 blake3 = "1"
 dunce = "1"
 strsim = "0.11"

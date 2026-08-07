@@ -19,7 +19,7 @@ use std::process::{Child, ExitCode, ExitStatus};
 
 use thiserror::Error;
 
-use crate::environment::Descriptor;
+use crate::environment::{Descriptor, FileLayer};
 use crate::shell::{SHELL_VARIABLE, Shell};
 
 /// A script, resolved down to everything spawning it needs.
@@ -38,6 +38,8 @@ pub struct ExecRequest<'a> {
   /// A relative value resolves against `package_dir`; an absolute one is used as given.
   pub cwd: Option<&'a Path>,
   pub env: &'a BTreeMap<String, String>,
+  /// The script's dotenv files, nearest to the script first.
+  pub env_files: &'a [FileLayer<'a>],
 }
 
 #[derive(Debug, Error)]
@@ -104,22 +106,29 @@ pub fn run(request: &ExecRequest<'_>) -> Result<Completion, ExecError> {
   let shell = resolve_shell(lookup(SHELL_VARIABLE), lookup("PATH"), lookup("PATHEXT"))?;
   let directory = working_directory(request)?;
 
-  let child_environment = environment::build(
+  let layering = environment::build(
     parent.iter().cloned(),
     &Descriptor {
       script_name: request.script_name,
       root: request.root,
       package_dir: request.package_dir,
       env: request.env,
+      env_files: request.env_files,
     },
   );
+
+  // Before the child starts, and on stderr: an assignment that silently did nothing is
+  // how a wrong environment survives a week, and stdout belongs to the child.
+  for ignored in &layering.ignored {
+    rune_out::diagnostic(&format!("warning: {ignored}"));
+  }
 
   // Quoting can only happen once the shell is known: the same argument needs three
   // different spellings depending on which of them is about to read the line.
   let command_line = quote::command_line(request.command, request.arguments, shell.kind);
 
   let mut command = shell.command(&command_line);
-  command.current_dir(&directory).env_clear().envs(child_environment.iter());
+  command.current_dir(&directory).env_clear().envs(layering.environment.iter());
 
   let (mut child, _teardown) = signals::spawn(&mut command, attach).map_err(|error| {
     let shell = shell.program.display().to_string();

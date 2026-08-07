@@ -1,0 +1,17 @@
+---
+source: crates/rune-cli/tests/env_files.rs
+description: a script whose file is half applied and half refused
+expression: "String::from_utf8_lossy(&output.stdout).replace(\"\\r\\n\", \"\\n\")"
+---
+probe
+
+command      vitest
+directory    .
+environment  API_URL=https://example.test
+             FOO=map
+ignored      `CI` from `.env` was ignored: the process environment already sets it
+             `FOO` from `.env` was ignored: this script's `env` already sets it
+             `RUNE_ROOT` from this script's `env` was ignored: `RUNE_` is reserved for rune's own variables
+
+resolved through
+  rune.config.ts  probe  runs `vitest`

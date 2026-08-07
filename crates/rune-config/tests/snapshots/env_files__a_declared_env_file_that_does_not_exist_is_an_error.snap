@@ -1,0 +1,12 @@
+---
+source: crates/rune-config/tests/env_files.rs
+description: a script naming a file that is not there
+expression: error
+---
+script `test` declares an envFile that does not exist
+
+  .env
+
+an `envFile` is resolved against the config that declares it, which is rune.config.ts.
+
+create the file, or remove `envFile` from the script.

@@ -1,0 +1,7 @@
+---
+source: crates/rune-cli/tests/env_files.rs
+description: "the reserved prefix, attempted from both sources"
+expression: stderr_of(&output)
+---
+warning: `RUNE_SCRIPT_NAME` from `.env` was ignored: `RUNE_` is reserved for rune's own variables
+warning: `RUNE_ROOT` from this script's `env` was ignored: `RUNE_` is reserved for rune's own variables

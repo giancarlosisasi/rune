@@ -8,9 +8,10 @@ use std::fmt::Write as _;
 use std::path::PathBuf;
 
 use rune_config::env::Environment;
-use rune_config::inherit::Scope;
+use rune_config::inherit::{Resolved, Scope};
 use rune_config::load::{Loaded, load};
 use rune_config::suggest::closest;
+use rune_exec::environment::FileLayer;
 
 /// Loads the configs that apply to the directory rune was started in.
 pub fn load_here() -> Result<Loaded, String> {
@@ -21,6 +22,18 @@ pub fn load_here() -> Result<Loaded, String> {
 
 pub fn working_directory() -> Result<PathBuf, String> {
   std::env::current_dir().map_err(|error| format!("cannot read the working directory: {error}"))
+}
+
+/// A resolution's dotenv files, in the shape the layering reads them.
+///
+/// Shared by `run` and `inspect` so that the explanation and the run cannot disagree
+/// about which files took part or in what order.
+pub fn env_files<'a>(resolved: &'a Resolved<'_>) -> Vec<FileLayer<'a>> {
+  resolved
+    .env_files
+    .iter()
+    .map(|file| FileLayer { source: &file.source, assignments: &file.assignments })
+    .collect()
 }
 
 /// The miss, what is available, and the likeliest correction.

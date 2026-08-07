@@ -2,6 +2,7 @@
 pub mod cache;
 pub mod discover;
 pub mod env;
+pub mod envfile;
 pub mod eval;
 pub mod globals;
 pub mod inherit;

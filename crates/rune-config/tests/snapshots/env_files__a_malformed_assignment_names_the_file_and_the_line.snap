@@ -1,0 +1,10 @@
+---
+source: crates/rune-config/tests/env_files.rs
+description: a line that is not an assignment
+expression: error
+---
+.env line 3 is not an assignment
+
+  not an assignment
+
+every line of an env file is `NAME=value`, a `#` comment, or empty.

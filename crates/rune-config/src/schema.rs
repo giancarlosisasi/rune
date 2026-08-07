@@ -15,7 +15,7 @@ use thiserror::Error;
 const DISCRIMINANTS: &[&str] = &["command", "extends"];
 
 /// Fields any script may carry, whatever its discriminant.
-const COMMON_FIELDS: &[&str] = &["description", "cwd", "env"];
+const COMMON_FIELDS: &[&str] = &["description", "cwd", "env", "envFile"];
 
 /// The arguments an extending script adds to what it inherits.
 const APPEND_ARGS: &str = "appendArgs";
@@ -127,6 +127,9 @@ pub struct Script {
   pub cwd: Option<String>,
   /// Variables the script sets for its own child, which win over inherited values.
   pub env: BTreeMap<String, String>,
+  /// A file of variables that fill the gaps the process environment leaves. Resolved
+  /// against the config that declares it, never against the working directory.
+  pub env_file: Option<String>,
   pub kind: Kind,
 }
 
@@ -193,6 +196,8 @@ struct Common {
   cwd: Option<String>,
   #[serde(default)]
   env: BTreeMap<String, String>,
+  #[serde(default, rename = "envFile")]
+  env_file: Option<String>,
 }
 
 /// Turns an evaluated config into the typed shape, or says exactly what is wrong with it.
@@ -255,7 +260,13 @@ fn parse_script(name: &str, entry: &serde_json::Value) -> Result<Script, SchemaE
   let common: Common = serde_json::from_value(entry.clone())
     .map_err(|source| SchemaError::Invalid { script: name.to_owned(), source })?;
 
-  Ok(Script { description: common.description, cwd: common.cwd, env: common.env, kind })
+  Ok(Script {
+    description: common.description,
+    cwd: common.cwd,
+    env: common.env,
+    env_file: common.env_file,
+    kind,
+  })
 }
 
 fn parse_extends(

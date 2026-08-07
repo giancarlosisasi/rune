@@ -6,7 +6,7 @@ use rune_config::env::PLATFORM;
 use rune_config::inherit::Scope;
 use rune_exec::{Completion, ExecRequest};
 
-use crate::script::{load_here, unknown};
+use crate::script::{env_files, load_here, unknown};
 
 /// Resolves `name` and runs it with the child owning the terminal.
 ///
@@ -20,6 +20,7 @@ pub fn run(name: &str, arguments: &[String], scope: Scope) -> Result<Completion,
 
   let mut all_arguments = resolved.append_args.clone();
   all_arguments.extend_from_slice(arguments);
+  let files = env_files(&resolved);
 
   let request = ExecRequest {
     script_name: name,
@@ -31,6 +32,7 @@ pub fn run(name: &str, arguments: &[String], scope: Scope) -> Result<Completion,
     package_dir: &loaded.discovered.package_dir,
     cwd: resolved.cwd.map(Path::new),
     env: &resolved.env,
+    env_files: &files,
   };
 
   rune_exec::run(&request).map_err(stringify)
