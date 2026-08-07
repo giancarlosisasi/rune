@@ -4,7 +4,7 @@ import './index.css';
 
 export * from '@rspress/core/theme-original';
 
-const AUTHOR_URL = 'https://github.com/giancarlosio';
+const AUTHOR_URL = 'https://github.com/giancarlosisasi';
 const REPO_URL = 'https://github.com/giancarlosio/rune';
 
 function Footer() {
