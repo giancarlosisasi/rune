@@ -15,7 +15,12 @@ struct Cli {
 #[derive(Subcommand)]
 enum Command {
   /// Run a script by name
-  Run { name: String },
+  Run {
+    name: String,
+    /// Arguments appended to the script's command, after `--`
+    #[arg(last = true)]
+    args: Vec<String>,
+  },
   /// List all available scripts
   List,
   /// Show how a script resolves and where it comes from
@@ -39,7 +44,7 @@ fn main() -> ExitCode {
   match cli.command {
     // The child's exit code is the product of this subcommand, so it does not go through
     // the success-or-diagnostic path the others share.
-    Command::Run { name } => match run::run(&name) {
+    Command::Run { name, args } => match run::run(&name, &args) {
       Ok(completion) => completion.exit_code(),
       Err(message) => fail(&message),
     },

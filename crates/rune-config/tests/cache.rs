@@ -4,7 +4,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use rune_config::env::Environment;
+use rune_config::env::{Environment, PLATFORM};
 use rune_config::load::load;
 use rune_config::schema::Script;
 use tempfile::TempDir;
@@ -39,7 +39,7 @@ fn command_of(dir: &Path) -> String {
 fn command_with(dir: &Path, environment: &Environment) -> String {
   let loaded = load(dir, environment).expect("config loads");
   let Script::Command(script) = &loaded.config.scripts["test"];
-  script.command.clone()
+  script.command.select(PLATFORM).to_owned()
 }
 
 fn cache_dir(dir: &Path) -> PathBuf {

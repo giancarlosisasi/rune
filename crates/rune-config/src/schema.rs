@@ -18,6 +18,14 @@ const DISCRIMINANTS: &[&str] = &["command"];
 /// Fields any script may carry, whatever its discriminant.
 const COMMON_FIELDS: &[&str] = &["description", "cwd", "env"];
 
+/// The keys a per-OS `command` object may hold. The names are Node's `process.platform`
+/// values, so a config reading `rune.platform` and a config using this object spell the
+/// same operating system the same way.
+const PER_OS_KEYS: &[&str] = &["default", "win32", "darwin", "linux"];
+
+/// The key every per-OS object must have.
+const FALLBACK_KEY: &str = "default";
+
 #[derive(Debug, Error)]
 pub enum SchemaError {
   #[error("the config must be an object with a `scripts` object; found {found}")]
@@ -34,6 +42,21 @@ pub enum SchemaError {
 
   #[error("script `{script}` has an unknown field `{field}`\n\nallowed here: {allowed}")]
   UnknownField { script: String, field: String, allowed: String },
+
+  #[error(
+    "script `{script}` has a `command` that is {found}\n\n\
+     a command is either a string, or an object naming one command per operating \
+     system: {}",
+    list(PER_OS_KEYS)
+  )]
+  CommandShape { script: String, found: String },
+
+  #[error(
+    "script `{script}` has a per-operating-system `command` with no `{FALLBACK_KEY}`\n\n\
+     `{FALLBACK_KEY}` is what runs on every system without an entry of its own.\n\
+     Without it this script would exist on some machines and not on others."
+  )]
+  NoFallback { script: String },
 
   #[error("script `{script}`: {source}")]
   Invalid { script: String, source: serde_json::Error },
@@ -77,16 +100,69 @@ impl Script {
   }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CommandScript {
-  pub command: String,
-  #[serde(default)]
+  pub command: Command,
   pub description: Option<String>,
-  #[serde(default)]
   pub cwd: Option<String>,
-  #[serde(default)]
   pub env: BTreeMap<String, String>,
+}
+
+/// What a script runs: one command everywhere, or one per operating system.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Command {
+  Everywhere(String),
+  PerOs(PerOsCommand),
+}
+
+impl Command {
+  /// The command string for `platform`, named the way `process.platform` names it.
+  pub fn select(&self, platform: &str) -> &str {
+    match self {
+      Self::Everywhere(command) => command,
+      Self::PerOs(per_os) => per_os.select(platform),
+    }
+  }
+}
+
+/// `rm -rf dist` and `rmdir /s /q dist` are one intent with two spellings.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PerOsCommand {
+  /// What a system with no entry of its own runs. Required, so that a config cannot
+  /// define a script which silently does not exist on somebody else's machine.
+  pub default: String,
+  pub win32: Option<String>,
+  pub darwin: Option<String>,
+  pub linux: Option<String>,
+}
+
+impl PerOsCommand {
+  /// The entry matching `platform`, or `default`.
+  ///
+  /// The platform is an argument rather than something read from `cfg!` here: that is
+  /// what lets one machine test the choice every other machine would make.
+  pub fn select(&self, platform: &str) -> &str {
+    let matched = match platform {
+      "win32" => self.win32.as_deref(),
+      "darwin" => self.darwin.as_deref(),
+      "linux" => self.linux.as_deref(),
+      _ => None,
+    };
+
+    matched.unwrap_or(&self.default)
+  }
+}
+
+/// The fields a script carries whatever kind it is. Deserialized apart from the
+/// discriminant so that the discriminant's own errors can name the script.
+#[derive(Debug, Deserialize)]
+struct Common {
+  #[serde(default)]
+  description: Option<String>,
+  #[serde(default)]
+  cwd: Option<String>,
+  #[serde(default)]
+  env: BTreeMap<String, String>,
 }
 
 /// Turns an evaluated config into the typed shape, or says exactly what is wrong with it.
@@ -131,12 +207,58 @@ fn parse_script(name: &str, entry: &serde_json::Value) -> Result<Script, SchemaE
       // Checked before deserializing so the message can name the script. serde's own
       // unknown-field error knows the field but not which entry it came from.
       reject_unknown_fields(name, object, &allowed_with(&["command"]))?;
-      serde_json::from_value(entry.clone())
-        .map(Script::Command)
-        .map_err(|source| SchemaError::Invalid { script: name.to_owned(), source })
+      let command = parse_command(name, &object["command"])?;
+      let common: Common = serde_json::from_value(entry.clone())
+        .map_err(|source| SchemaError::Invalid { script: name.to_owned(), source })?;
+
+      Ok(Script::Command(CommandScript {
+        command,
+        description: common.description,
+        cwd: common.cwd,
+        env: common.env,
+      }))
     }
     other => unreachable!("`{other}` is listed as a discriminant but has no arm"),
   }
+}
+
+fn parse_command(script: &str, value: &serde_json::Value) -> Result<Command, SchemaError> {
+  if let Some(command) = value.as_str() {
+    return Ok(Command::Everywhere(command.to_owned()));
+  }
+
+  let Some(object) = value.as_object() else {
+    return Err(SchemaError::CommandShape { script: script.to_owned(), found: describe(value) });
+  };
+
+  for key in object.keys() {
+    if !PER_OS_KEYS.contains(&key.as_str()) {
+      return Err(SchemaError::UnknownField {
+        script: script.to_owned(),
+        field: key.clone(),
+        allowed: list(PER_OS_KEYS),
+      });
+    }
+  }
+
+  let entry = |key: &str| -> Result<Option<String>, SchemaError> {
+    match object.get(key) {
+      None => Ok(None),
+      Some(value) => value.as_str().map(|command| Some(command.to_owned())).ok_or_else(|| {
+        SchemaError::CommandShape { script: script.to_owned(), found: describe(value) }
+      }),
+    }
+  };
+
+  let default =
+    entry(FALLBACK_KEY)?.ok_or_else(|| SchemaError::NoFallback { script: script.to_owned() })?;
+
+  Ok(Command::PerOs(PerOsCommand {
+    default,
+    win32: entry("win32")?,
+    darwin: entry("darwin")?,
+    linux: entry("linux")?,
+  }))
 }
 
 /// The fields legal for one variant: its own discriminant plus everything shared.
@@ -176,7 +298,7 @@ fn describe(value: &serde_json::Value) -> String {
 mod tests {
   use serde_json::json;
 
-  use super::{Script, parse};
+  use super::{PerOsCommand, Script, parse};
 
   #[test]
   fn a_command_script_parses() {
@@ -186,8 +308,89 @@ mod tests {
     .expect("parses");
 
     let Script::Command(dev) = &config.scripts["dev"];
-    assert_eq!(dev.command, "vite");
+    assert_eq!(dev.command.select("linux"), "vite");
     assert_eq!(dev.description.as_deref(), Some("start the dev server"));
+  }
+
+  /// Test 4a.3 — all four branches, on every machine.
+  ///
+  /// The platform is an argument precisely so this table runs everywhere. Reading `cfg!`
+  /// inside `select` would leave a Linux runner exercising one branch out of four, and
+  /// the fallback branch exercised on no machine at all.
+  #[test]
+  fn per_os_selection_covers_every_branch() {
+    let per_os = PerOsCommand {
+      default: "make build".to_owned(),
+      win32: Some("build.cmd".to_owned()),
+      darwin: Some("make build-mac".to_owned()),
+      linux: Some("make build-linux".to_owned()),
+    };
+
+    for (platform, expected) in [
+      ("win32", "build.cmd"),
+      ("darwin", "make build-mac"),
+      ("linux", "make build-linux"),
+      ("freebsd", "make build"),
+    ] {
+      assert_eq!(per_os.select(platform), expected, "on `{platform}`");
+    }
+  }
+
+  /// A system the object names no entry for is the same case as a system rune has never
+  /// heard of: `default` is what both get.
+  #[test]
+  fn an_absent_entry_falls_back_the_same_way_an_unknown_system_does() {
+    let per_os = PerOsCommand {
+      default: "rm -rf dist".to_owned(),
+      win32: Some("rmdir /s /q dist".to_owned()),
+      darwin: None,
+      linux: None,
+    };
+
+    assert_eq!(per_os.select("win32"), "rmdir /s /q dist");
+    assert_eq!(per_os.select("darwin"), "rm -rf dist");
+  }
+
+  #[test]
+  fn a_per_os_command_parses() {
+    let config = parse(&json!({
+      "scripts": { "clean": { "command": { "default": "rm -rf dist", "win32": "rmdir /s /q dist" } } }
+    }))
+    .expect("parses");
+
+    let Script::Command(clean) = &config.scripts["clean"];
+    assert_eq!(clean.command.select("win32"), "rmdir /s /q dist");
+    assert_eq!(clean.command.select("linux"), "rm -rf dist");
+  }
+
+  /// An object with only `default` is legal, and is the string form written the long way.
+  #[test]
+  fn a_per_os_command_with_only_default_behaves_like_a_string() {
+    let config = parse(&json!({ "scripts": { "build": { "command": { "default": "tsc" } } } }))
+      .expect("parses");
+
+    let Script::Command(build) = &config.scripts["build"];
+    assert_eq!(build.command.select("win32"), "tsc");
+  }
+
+  #[test]
+  fn a_per_os_command_rejects_a_key_that_is_not_an_operating_system() {
+    let error = parse(&json!({
+      "scripts": { "clean": { "command": { "default": "rm -rf dist", "windows": "rmdir" } } }
+    }))
+    .unwrap_err()
+    .to_string();
+
+    assert!(error.contains("`clean`"), "{error}");
+    assert!(error.contains("`windows`"), "{error}");
+  }
+
+  #[test]
+  fn a_command_that_is_neither_a_string_nor_an_object_is_rejected() {
+    let error =
+      parse(&json!({ "scripts": { "build": { "command": ["tsc"] } } })).unwrap_err().to_string();
+
+    assert!(error.contains("`build`"), "{error}");
   }
 
   /// Test 2.13 — the typo case. Naming the field without naming the script leaves the

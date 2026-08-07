@@ -2,7 +2,7 @@
 
 use std::fmt::Write as _;
 
-use rune_config::env::Environment;
+use rune_config::env::{Environment, PLATFORM};
 use rune_config::load::load;
 use rune_config::schema::{Config, Script};
 use rune_exec::{Completion, ExecRequest};
@@ -12,7 +12,11 @@ use rune_exec::{Completion, ExecRequest};
 const SUGGESTION_LIMIT: usize = 3;
 
 /// Loads the config, finds `name`, and runs it with the child owning the terminal.
-pub fn run(name: &str) -> Result<Completion, String> {
+///
+/// `arguments` are what the user typed after `--`. They go last, after anything the
+/// config itself contributes, because the config is the default and the command line is
+/// the override — the same order a shell gives precedence in.
+pub fn run(name: &str, arguments: &[String]) -> Result<Completion, String> {
   let working_directory = std::env::current_dir()
     .map_err(|error| format!("cannot read the working directory: {error}"))?;
 
@@ -22,7 +26,10 @@ pub fn run(name: &str) -> Result<Completion, String> {
   let Script::Command(command) = script;
   let request = ExecRequest {
     script_name: name,
-    command: &command.command,
+    // `PLATFORM` is the same constant a config reads as `rune.platform`, so a config
+    // branching by hand and a per-OS object cannot disagree about which system this is.
+    command: command.command.select(PLATFORM),
+    arguments,
     root: &loaded.discovered.root,
     package_dir: &loaded.discovered.package_dir,
     cwd: script.cwd(),
@@ -74,7 +81,7 @@ fn stringify(error: impl std::fmt::Display) -> String {
 mod tests {
   use std::collections::BTreeMap;
 
-  use rune_config::schema::{CommandScript, Config, Script};
+  use rune_config::schema::{Command, CommandScript, Config, Script};
 
   use super::{closest_match, unknown};
 
@@ -84,7 +91,7 @@ mod tests {
         .iter()
         .map(|name| {
           let script = CommandScript {
-            command: "true".to_owned(),
+            command: Command::Everywhere("true".to_owned()),
             description: None,
             cwd: None,
             env: BTreeMap::new(),

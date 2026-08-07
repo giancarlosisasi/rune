@@ -7,6 +7,7 @@
 
 pub mod bin_paths;
 pub mod environment;
+pub mod quote;
 pub mod shell;
 mod signals;
 pub mod teardown;
@@ -25,6 +26,10 @@ use crate::shell::{SHELL_VARIABLE, Shell};
 pub struct ExecRequest<'a> {
   pub script_name: &'a str,
   pub command: &'a str,
+  /// Appended to `command`, in order, each quoted for the shell that will read them.
+  /// The caller owns the order: whatever configuration contributes comes first, and what
+  /// the user typed on the command line comes last.
+  pub arguments: &'a [String],
   /// The directory holding the config that defined the script.
   pub root: &'a Path,
   /// The package the run started from. The default working directory, and the deepest
@@ -110,7 +115,11 @@ pub fn run(request: &ExecRequest<'_>) -> Result<Completion, ExecError> {
     },
   );
 
-  let mut command = shell.command(request.command);
+  // Quoting can only happen once the shell is known: the same argument needs three
+  // different spellings depending on which of them is about to read the line.
+  let command_line = quote::command_line(request.command, request.arguments, shell.kind);
+
+  let mut command = shell.command(&command_line);
   command.current_dir(&directory).env_clear().envs(child_environment.iter());
 
   let (mut child, _teardown) = signals::spawn(&mut command, attach).map_err(|error| {

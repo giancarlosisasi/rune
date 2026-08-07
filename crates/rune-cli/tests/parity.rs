@@ -12,7 +12,7 @@
 mod harness;
 
 use std::fmt::Write as _;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 use harness::{Test, pinned_shell};
@@ -37,6 +37,27 @@ const TABLE: &[(&str, &str)] = &[
   ("glob_expands", "echo parity-*.txt"),
   ("glob_quoted", "echo 'a*b'"),
   ("exit_code", "exit 7"),
+];
+
+/// The script the argument comparison appends to, and its command. Named `test` because
+/// `rune run test -- --watch` is the invocation this change exists to make work.
+const APPEND_TO: (&str, &str) = ("test", "echo");
+
+/// Argument lists worth running through both tools.
+///
+/// Every entry is a shape where a quoting mistake changes the result rather than the
+/// spelling: a value that would split in two, a character a shell would act on, a quote
+/// that would close early, and the separator itself.
+const ARGUMENTS: &[&[&str]] = &[
+  &["--watch"],
+  &["--flag", "a b"],
+  &[],
+  &["--"],
+  &["a&b"],
+  &[r#"say "hi""#],
+  &["it's"],
+  &["$PARITY_VAR"],
+  &["%PARITY_VAR%"],
 ];
 
 /// What one side of the comparison produced.
@@ -68,11 +89,68 @@ fn every_command_string_behaves_the_same_through_rune_and_through_npm() {
   assert!(report.is_empty(), "\nrune and npm disagree:\n{report}");
 }
 
+/// Test 4a.2 — the same claim, about the arguments a user appends.
+///
+/// A pass-through argument is quoted by rune and by npm independently, so this is the
+/// row that would catch rune quoting for the wrong shell. It runs once per shell kind
+/// both tools handle the same way, which is what makes the `cmd.exe` rules a tested
+/// claim on Windows rather than a table somebody wrote from memory.
+#[test]
+fn appended_arguments_behave_the_same_through_rune_and_through_npm() {
+  let Some(npm) = oracle() else {
+    return;
+  };
+
+  let test = fixture();
+  let mut report = String::new();
+
+  for (kind, shell) in comparable_shells() {
+    for passed in ARGUMENTS {
+      let mut oracle = npm_command(&npm, test.dir(), APPEND_TO.0);
+      oracle.env(pinned_shell_variable(), &shell).arg("--").args(*passed);
+      let expected = observe(&mut oracle);
+
+      let mut rune = test.command(test.dir());
+      rune.env(pinned_shell_variable(), &shell).args(["run", APPEND_TO.0]).arg("--").args(*passed);
+      let actual = observe(&mut rune);
+
+      if actual != expected {
+        describe(kind, &format!("{APPEND_TO:?} -- {passed:?}"), &expected, &actual, &mut report);
+      }
+    }
+  }
+
+  assert!(report.is_empty(), "\nrune and npm disagree:\n{report}");
+}
+
+/// The shells rune and npm claim to hand arguments to the same way.
+///
+/// PowerShell is deliberately absent. npm quotes POSIX-style for every shell that is not
+/// `cmd.exe`, PowerShell included, which is the bug this change exists not to repeat —
+/// comparing there would assert that rune reproduces it. PowerShell quoting is held to
+/// its own rules by the unit table in `rune-exec`.
+fn comparable_shells() -> Vec<(&'static str, PathBuf)> {
+  let mut shells = vec![("posix", pinned_shell())];
+
+  if cfg!(windows) {
+    shells.push(("cmd", PathBuf::from("cmd.exe")));
+  }
+
+  shells
+}
+
+/// npm's own setting, which rune reads too — the one knob that pins both sides to the
+/// same shell.
+fn pinned_shell_variable() -> &'static str {
+  "npm_config_script_shell"
+}
+
 /// A directory both tools can run: one config for rune, one `package.json` for npm, the
 /// same command strings in each, and two files for the glob to find.
 fn fixture() -> Test {
   let scripts: Vec<String> = TABLE
     .iter()
+    .chain(std::iter::once(&APPEND_TO))
     .map(|(name, command)| format!("{name}: {{ command: {} }}", quoted(command)))
     .collect();
 
@@ -82,6 +160,7 @@ fn fixture() -> Test {
     "private": true,
     "scripts": TABLE
       .iter()
+      .chain(std::iter::once(&APPEND_TO))
       .map(|(name, command)| ((*name).to_owned(), serde_json::Value::from(*command)))
       .collect::<serde_json::Map<String, serde_json::Value>>(),
   });

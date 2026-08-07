@@ -1,0 +1,11 @@
+---
+source: crates/rune-config/tests/schema.rs
+description: per-OS command with no default
+expression: error
+---
+[TMP]/rune.config.ts is not a valid rune config
+
+script `clean` has a per-operating-system `command` with no `default`
+
+`default` is what runs on every system without an entry of its own.
+Without it this script would exist on some machines and not on others.
