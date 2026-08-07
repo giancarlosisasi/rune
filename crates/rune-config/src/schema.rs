@@ -7,16 +7,18 @@
 //! script is wrong and which word in it is the problem.
 
 use std::collections::BTreeMap;
-use std::path::Path;
 
 use serde::Deserialize;
 use thiserror::Error;
 
 /// The keys that decide which kind of script an entry is. Each later change adds one.
-const DISCRIMINANTS: &[&str] = &["command"];
+const DISCRIMINANTS: &[&str] = &["command", "extends"];
 
 /// Fields any script may carry, whatever its discriminant.
 const COMMON_FIELDS: &[&str] = &["description", "cwd", "env"];
+
+/// The arguments an extending script adds to what it inherits.
+const APPEND_ARGS: &str = "appendArgs";
 
 /// The keys a per-OS `command` object may hold. The names are Node's `process.platform`
 /// values, so a config reading `rune.platform` and a config using this object spell the
@@ -37,8 +39,22 @@ pub enum SchemaError {
   #[error("script `{script}` has no command\n\nevery script needs one of: {}", list(DISCRIMINANTS))]
   NoDiscriminant { script: String },
 
-  #[error("script `{script}` sets both `{first}` and `{second}` — a script may only be one kind")]
+  #[error(
+    "script `{script}` sets both `{first}` and `{second}`\n\n\
+     a script is exactly one kind, so keep the one you meant and remove the other:\n  \
+     `{first}` {}\n  `{second}` {}",
+    meaning(.first),
+    meaning(.second)
+  )]
   ManyDiscriminants { script: String, first: String, second: String },
+
+  #[error(
+    "script `{script}` sets `{APPEND_ARGS}` but does not extend anything\n\n\
+     `{APPEND_ARGS}` adds arguments to a command a script inherits, so it only means \
+     something\nnext to `extends`. A script with a `command` of its own writes its \
+     arguments into it."
+  )]
+  AppendArgsWithoutExtends { script: String },
 
   #[error("script `{script}` has an unknown field `{field}`\n\nallowed here: {allowed}")]
   UnknownField { script: String, field: String, allowed: String },
@@ -58,12 +74,41 @@ pub enum SchemaError {
   )]
   NoFallback { script: String },
 
+  #[error("script `{script}` extends {found}\n\n`extends` is the name of another script")]
+  ExtendsShape { script: String, found: String },
+
+  #[error(
+    "script `{script}` has an `{APPEND_ARGS}` that is {found}\n\n\
+     `{APPEND_ARGS}` is a list of arguments, one element per argument:\n\n  \
+     {APPEND_ARGS}: [\"--maxWorkers=1\"]"
+  )]
+  AppendArgsShape { script: String, found: String },
+
+  #[error(
+    "script `{script}` has {APPEND_ARGS} element {position} that is {found}\n\n\
+     every element is one argument, written as a string"
+  )]
+  AppendArgsElement { script: String, position: usize, found: String },
+
   #[error("script `{script}`: {source}")]
   Invalid { script: String, source: serde_json::Error },
 }
 
 fn list(names: &[&str]) -> String {
   names.iter().map(|name| format!("`{name}`")).collect::<Vec<_>>().join(", ")
+}
+
+/// What each discriminant makes a script do, in one line.
+///
+/// The conflict error prints this for both keys it found, so a user picks the one they
+/// meant without opening the documentation. Every variant a later change adds gets a
+/// line here, and the conflict message keeps working without being rewritten.
+fn meaning(discriminant: &str) -> &'static str {
+  match discriminant {
+    "command" => "runs a command of its own",
+    "extends" => "builds on another script and adds to it",
+    other => unreachable!("`{other}` is listed as a discriminant but has no meaning"),
+  }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -73,39 +118,24 @@ pub struct Config {
   pub scripts: BTreeMap<String, Script>,
 }
 
+/// One entry of the `scripts` object: the fields every script may carry, plus the one
+/// thing that makes it the kind of script it is.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Script {
-  Command(CommandScript),
-}
-
-impl Script {
-  pub fn description(&self) -> Option<&str> {
-    match self {
-      Self::Command(script) => script.description.as_deref(),
-    }
-  }
-
-  /// Where the script runs. A relative value is resolved against the invoking package.
-  pub fn cwd(&self) -> Option<&Path> {
-    match self {
-      Self::Command(script) => script.cwd.as_deref().map(Path::new),
-    }
-  }
-
-  /// Variables the script sets for its own child, which win over inherited values.
-  pub fn env(&self) -> &BTreeMap<String, String> {
-    match self {
-      Self::Command(script) => &script.env,
-    }
-  }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CommandScript {
-  pub command: Command,
+pub struct Script {
   pub description: Option<String>,
+  /// Where the script runs. A relative value is resolved against the invoking package.
   pub cwd: Option<String>,
+  /// Variables the script sets for its own child, which win over inherited values.
   pub env: BTreeMap<String, String>,
+  pub kind: Kind,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Kind {
+  /// Runs a command of its own.
+  Command(Command),
+  /// Runs another script's command, with more arguments after it.
+  Extends { target: String, append_args: Vec<String> },
 }
 
 /// What a script runs: one command everywhere, or one per operating system.
@@ -195,6 +225,12 @@ fn parse_script(name: &str, entry: &serde_json::Value) -> Result<Script, SchemaE
     });
   }
 
+  // Before the discriminant dispatch, so that the message is about the mistake the user
+  // made rather than about a field that happens to be unknown to the arm they landed in.
+  if object.contains_key(APPEND_ARGS) && !object.contains_key("extends") {
+    return Err(SchemaError::AppendArgsWithoutExtends { script: name.to_owned() });
+  }
+
   let Some(discriminant) = found else {
     // A misspelled discriminant is indistinguishable from a missing one, and it is by
     // far the likelier mistake, so name the offending word when there is one.
@@ -202,24 +238,56 @@ fn parse_script(name: &str, entry: &serde_json::Value) -> Result<Script, SchemaE
     return Err(SchemaError::NoDiscriminant { script: name.to_owned() });
   };
 
-  match *discriminant {
+  let kind = match *discriminant {
     "command" => {
       // Checked before deserializing so the message can name the script. serde's own
       // unknown-field error knows the field but not which entry it came from.
       reject_unknown_fields(name, object, &allowed_with(&["command"]))?;
-      let command = parse_command(name, &object["command"])?;
-      let common: Common = serde_json::from_value(entry.clone())
-        .map_err(|source| SchemaError::Invalid { script: name.to_owned(), source })?;
-
-      Ok(Script::Command(CommandScript {
-        command,
-        description: common.description,
-        cwd: common.cwd,
-        env: common.env,
-      }))
+      Kind::Command(parse_command(name, &object["command"])?)
+    }
+    "extends" => {
+      reject_unknown_fields(name, object, &allowed_with(&["extends", APPEND_ARGS]))?;
+      parse_extends(name, object)?
     }
     other => unreachable!("`{other}` is listed as a discriminant but has no arm"),
+  };
+
+  let common: Common = serde_json::from_value(entry.clone())
+    .map_err(|source| SchemaError::Invalid { script: name.to_owned(), source })?;
+
+  Ok(Script { description: common.description, cwd: common.cwd, env: common.env, kind })
+}
+
+fn parse_extends(
+  script: &str,
+  object: &serde_json::Map<String, serde_json::Value>,
+) -> Result<Kind, SchemaError> {
+  let value = &object["extends"];
+  let target = value
+    .as_str()
+    .ok_or_else(|| SchemaError::ExtendsShape { script: script.to_owned(), found: describe(value) })?
+    .to_owned();
+
+  let Some(arguments) = object.get(APPEND_ARGS) else {
+    return Ok(Kind::Extends { target, append_args: Vec::new() });
+  };
+
+  let arguments = arguments.as_array().ok_or_else(|| SchemaError::AppendArgsShape {
+    script: script.to_owned(),
+    found: describe(arguments),
+  })?;
+
+  let mut append_args = Vec::with_capacity(arguments.len());
+  for (position, argument) in arguments.iter().enumerate() {
+    let argument = argument.as_str().ok_or_else(|| SchemaError::AppendArgsElement {
+      script: script.to_owned(),
+      position,
+      found: describe(argument),
+    })?;
+    append_args.push(argument.to_owned());
   }
+
+  Ok(Kind::Extends { target, append_args })
 }
 
 fn parse_command(script: &str, value: &serde_json::Value) -> Result<Command, SchemaError> {
@@ -298,7 +366,15 @@ fn describe(value: &serde_json::Value) -> String {
 mod tests {
   use serde_json::json;
 
-  use super::{PerOsCommand, Script, parse};
+  use super::{Kind, PerOsCommand, parse};
+
+  /// The command of a script that has one, for the tests that only care about that.
+  fn command_of(config: &super::Config, name: &str, platform: &str) -> String {
+    match &config.scripts[name].kind {
+      Kind::Command(command) => command.select(platform).to_owned(),
+      Kind::Extends { .. } => panic!("`{name}` extends rather than running a command"),
+    }
+  }
 
   #[test]
   fn a_command_script_parses() {
@@ -307,9 +383,62 @@ mod tests {
     }))
     .expect("parses");
 
-    let Script::Command(dev) = &config.scripts["dev"];
-    assert_eq!(dev.command.select("linux"), "vite");
-    assert_eq!(dev.description.as_deref(), Some("start the dev server"));
+    assert_eq!(command_of(&config, "dev", "linux"), "vite");
+    assert_eq!(config.scripts["dev"].description.as_deref(), Some("start the dev server"));
+  }
+
+  /// The `extends` half of the discriminant dispatch, with both of its fields.
+  #[test]
+  fn an_extending_script_parses() {
+    let config = parse(&json!({
+      "scripts": {
+        "test": { "command": "vitest" },
+        "test:ci": { "extends": "test", "appendArgs": ["--run", "--reporter=dot"] },
+      }
+    }))
+    .expect("parses");
+
+    let Kind::Extends { target, append_args } = &config.scripts["test:ci"].kind else {
+      panic!("`test:ci` did not parse as an extending script");
+    };
+    assert_eq!(target, "test");
+    assert_eq!(append_args, &["--run".to_owned(), "--reporter=dot".to_owned()]);
+  }
+
+  /// `appendArgs` is optional: extending a script without adding anything is how a
+  /// package renames a shared command or changes only its `env`.
+  #[test]
+  fn an_extending_script_without_append_args_parses() {
+    let config = parse(&json!({
+      "scripts": { "a": { "command": "vitest" }, "b": { "extends": "a" } }
+    }))
+    .expect("parses");
+
+    let Kind::Extends { append_args, .. } = &config.scripts["b"].kind else {
+      panic!("`b` did not parse as an extending script");
+    };
+    assert!(append_args.is_empty());
+  }
+
+  #[test]
+  fn an_extends_that_is_not_a_name_is_rejected() {
+    let error =
+      parse(&json!({ "scripts": { "b": { "extends": ["a"] } } })).unwrap_err().to_string();
+
+    assert!(error.contains("`b`"), "{error}");
+  }
+
+  #[test]
+  fn append_args_must_be_a_list_of_strings() {
+    let error = parse(&json!({ "scripts": { "b": { "extends": "a", "appendArgs": "--run" } } }))
+      .unwrap_err()
+      .to_string();
+    assert!(error.contains("appendArgs"), "{error}");
+
+    let error = parse(&json!({ "scripts": { "b": { "extends": "a", "appendArgs": [1] } } }))
+      .unwrap_err()
+      .to_string();
+    assert!(error.contains("appendArgs"), "{error}");
   }
 
   /// Test 4a.3 — all four branches, on every machine.
@@ -358,9 +487,8 @@ mod tests {
     }))
     .expect("parses");
 
-    let Script::Command(clean) = &config.scripts["clean"];
-    assert_eq!(clean.command.select("win32"), "rmdir /s /q dist");
-    assert_eq!(clean.command.select("linux"), "rm -rf dist");
+    assert_eq!(command_of(&config, "clean", "win32"), "rmdir /s /q dist");
+    assert_eq!(command_of(&config, "clean", "linux"), "rm -rf dist");
   }
 
   /// An object with only `default` is legal, and is the string form written the long way.
@@ -369,8 +497,7 @@ mod tests {
     let config = parse(&json!({ "scripts": { "build": { "command": { "default": "tsc" } } } }))
       .expect("parses");
 
-    let Script::Command(build) = &config.scripts["build"];
-    assert_eq!(build.command.select("win32"), "tsc");
+    assert_eq!(command_of(&config, "build", "win32"), "tsc");
   }
 
   #[test]
@@ -411,6 +538,7 @@ mod tests {
 
     assert!(error.contains("`empty`"), "{error}");
     assert!(error.contains("`command`"), "{error}");
+    assert!(error.contains("`extends`"), "{error}");
   }
 
   #[test]

@@ -5,8 +5,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use rune_config::env::{Environment, PLATFORM};
+use rune_config::inherit::Scope;
 use rune_config::load::load;
-use rune_config::schema::Script;
 use tempfile::TempDir;
 
 const HELPER: &str = "export const COMMAND: string = 'vitest --run';\n";
@@ -38,8 +38,19 @@ fn command_of(dir: &Path) -> String {
 
 fn command_with(dir: &Path, environment: &Environment) -> String {
   let loaded = load(dir, environment).expect("config loads");
-  let Script::Command(script) = &loaded.config.scripts["test"];
-  script.command.select(PLATFORM).to_owned()
+  let resolved =
+    loaded.resolve("test", Scope::Nearest).expect("resolves").expect("`test` is defined");
+
+  resolved.command.select(PLATFORM).to_owned()
+}
+
+/// What `test` resolves to from `dir`: the base command, and everything appended to it.
+fn resolution(dir: &Path) -> (String, Vec<String>) {
+  let loaded = load(dir, &Environment::default()).expect("config loads");
+  let resolved =
+    loaded.resolve("test", Scope::Nearest).expect("resolves").expect("`test` is defined");
+
+  (resolved.command.select(PLATFORM).to_owned(), resolved.append_args.clone())
 }
 
 fn cache_dir(dir: &Path) -> PathBuf {
@@ -180,6 +191,64 @@ fn is_ci_invalidates_the_cache_like_any_other_variable() {
   assert_eq!(command_with(dir.path(), &laptop), "vitest");
   assert_eq!(command_with(dir.path(), &ci), "vitest --run");
   assert_eq!(command_with(dir.path(), &laptop), "vitest");
+}
+
+/// Test 4b.13 — one key over both import closures.
+///
+/// A key covering only the root config is the worst failure available to this project:
+/// a package edits its own config, the next run reports success, and the command it ran
+/// came from the definition the package had already replaced. All four files are edited
+/// here — both configs and both of their imports — because the closure is what the key
+/// covers, not the entry file.
+#[test]
+fn either_configs_closure_invalidates_the_entry() {
+  let dir = fixture(&[
+    (".git/HEAD", "ref: refs/heads/main\n"),
+    ("root-helper.ts", "export const COMMAND: string = 'jest';\n"),
+    (
+      "rune.config.ts",
+      "import { COMMAND } from './root-helper';\n\
+       export default { scripts: { test: { command: COMMAND } } };\n",
+    ),
+    ("packages/legacy/package.json", "{ \"name\": \"legacy\" }\n"),
+    ("packages/legacy/flag.ts", "export const FLAG: string = '--maxWorkers=1';\n"),
+    (
+      "packages/legacy/rune.config.ts",
+      "import { FLAG } from './flag';\n\
+       export default { scripts: { test: { extends: 'test', appendArgs: [FLAG] } } };\n",
+    ),
+  ]);
+  let start = dir.path().join("packages/legacy");
+
+  assert_eq!(resolution(&start), ("jest".to_owned(), vec!["--maxWorkers=1".to_owned()]));
+
+  let cases = [
+    ("root-helper.ts", "export const COMMAND: string = 'vitest';\n"),
+    ("packages/legacy/flag.ts", "export const FLAG: string = '--maxWorkers=2';\n"),
+    (
+      "rune.config.ts",
+      "import { COMMAND } from './root-helper';\n\
+       export default { scripts: { test: { command: COMMAND + ' --run' } } };\n",
+    ),
+    (
+      "packages/legacy/rune.config.ts",
+      "import { FLAG } from './flag';\n\
+       export default { scripts: { test: { extends: 'test', appendArgs: [FLAG, '--bail'] } } };\n",
+    ),
+  ];
+
+  let expected = [
+    ("vitest".to_owned(), vec!["--maxWorkers=1".to_owned()]),
+    ("vitest".to_owned(), vec!["--maxWorkers=2".to_owned()]),
+    ("vitest --run".to_owned(), vec!["--maxWorkers=2".to_owned()]),
+    ("vitest --run".to_owned(), vec!["--maxWorkers=2".to_owned(), "--bail".to_owned()]),
+  ];
+
+  for ((relative, contents), expected) in cases.into_iter().zip(expected) {
+    fs::write(dir.path().join(relative), contents).expect("edit the fixture file");
+
+    assert_eq!(resolution(&start), expected, "editing `{relative}` served a stale result");
+  }
 }
 
 /// A config that never mentions `isCI` must not be invalidated by `CI` changing.

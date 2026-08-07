@@ -1,0 +1,12 @@
+---
+source: crates/rune-cli/tests/inheritance.rs
+description: a script only the package defines
+expression: "String::from_utf8_lossy(&output.stdout).replace(\"\\r\\n\", \"\\n\")"
+---
+codegen
+
+command      echo generating
+directory    packages/legacy/src
+
+resolved through
+  packages/legacy/rune.config.ts  codegen  runs `echo generating`

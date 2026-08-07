@@ -50,3 +50,47 @@ fn a_per_os_command_without_default_is_rejected_at_load_time() {
     insta::assert_snapshot!(error);
   });
 }
+
+/// Test 4b.5 — a script that both runs a command and extends another one.
+///
+/// The two answer the same question, so a script carrying both has no meaning rune could
+/// pick without guessing. Naming the script and both words is what turns a rejected
+/// config into a one-line edit.
+#[test]
+fn a_script_with_both_command_and_extends_is_rejected() {
+  let error = rejection(
+    "export default {\n  scripts: {\n    \
+     base: { command: 'vitest' },\n    \
+     ci: { command: 'vitest --run', extends: 'base' },\n  \
+     },\n};\n",
+  );
+
+  assert!(error.contains("`ci`"), "the message must name the script: {error}");
+  assert!(error.contains("`command`"), "the message must name the first key: {error}");
+  assert!(error.contains("`extends`"), "the message must name the second key: {error}");
+
+  insta::with_settings!({ description => "a script declaring command and extends together" }, {
+    insta::assert_snapshot!(error);
+  });
+}
+
+/// Test 4b.6 — `appendArgs` on a script that extends nothing.
+///
+/// The arguments would have nothing to be appended to. Silently ignoring them is the
+/// failure worth avoiding: the script runs, looks right, and quietly drops a flag.
+#[test]
+fn append_args_without_extends_is_rejected() {
+  let error = rejection(
+    "export default {\n  scripts: {\n    \
+     test: { command: 'vitest', appendArgs: ['--run'] },\n  \
+     },\n};\n",
+  );
+
+  assert!(error.contains("`test`"), "the message must name the script: {error}");
+  assert!(error.contains("`appendArgs`"), "the message must name the key: {error}");
+  assert!(error.contains("`extends`"), "the message must name what it needs: {error}");
+
+  insta::with_settings!({ description => "appendArgs on a script that extends nothing" }, {
+    insta::assert_snapshot!(error);
+  });
+}

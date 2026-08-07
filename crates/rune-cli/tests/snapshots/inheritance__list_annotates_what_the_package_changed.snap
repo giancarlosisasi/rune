@@ -1,0 +1,8 @@
+---
+source: crates/rune-cli/tests/inheritance.rs
+description: listed from a package that overrides one script and defines one
+expression: "String::from_utf8_lossy(&output.stdout).replace(\"\\r\\n\", \"\\n\")"
+---
+build    compile the workspace
+codegen  regenerate the client  (defined here)
+test     run the unit tests     (overridden here)

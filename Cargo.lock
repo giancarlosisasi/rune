@@ -1160,7 +1160,6 @@ dependencies = [
  "rune-exec",
  "rune-out",
  "serde_json",
- "strsim",
  "tempfile",
  "unindent",
  "windows-sys",
@@ -1178,6 +1177,7 @@ dependencies = [
  "rquickjs",
  "serde",
  "serde_json",
+ "strsim",
  "tempfile",
  "thiserror 2.0.19",
 ]

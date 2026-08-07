@@ -1,0 +1,12 @@
+---
+source: crates/rune-cli/tests/inheritance.rs
+description: a root script with no inheritance
+expression: "String::from_utf8_lossy(&output.stdout).replace(\"\\r\\n\", \"\\n\")"
+---
+build
+
+command      tsc -b
+directory    .
+
+resolved through
+  rune.config.ts  build  runs `tsc -b`

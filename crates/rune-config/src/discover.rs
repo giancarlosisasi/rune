@@ -1,8 +1,12 @@
-//! Finding the config by walking upward, and knowing when to stop.
+//! Finding the configs by walking upward, and knowing when to stop.
 //!
 //! The boundary is not an optimization. Without it a Rune run in a scratch directory —
 //! or a test in a temporary one — walks all the way up and picks up an unrelated config
 //! from somewhere else on the machine, and the result depends on whose machine it is.
+//!
+//! The walk records every config it passes, because two of them matter: the outermost one
+//! defines what the repository shares, and the nearest one is how a single package
+//! narrows it.
 
 use std::path::{Path, PathBuf};
 
@@ -30,18 +34,34 @@ pub struct NotFound {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Discovered {
-  /// The config file itself.
-  pub config: PathBuf,
-  /// The directory holding the config — the monorepo root, in practice.
+  /// The outermost config found before the boundary — what the repository shares.
+  pub root_config: PathBuf,
+  /// The directory holding the root config — the monorepo root, in practice.
   pub root: PathBuf,
+  /// The nearest config at or above the working directory, when it is not the root
+  /// config itself. This is the one that may narrow a shared definition.
+  ///
+  /// Exactly two configs take part, never more. A config between these two takes no
+  /// part: resolution answers "what does the repository say, and what does this package
+  /// say about it", and a third opinion in the middle would need an order nobody can
+  /// predict from the file they are reading.
+  pub package_config: Option<PathBuf>,
   /// The nearest package directory at or above the starting point. Scripts run here.
   pub package_dir: PathBuf,
 }
 
-/// Walks up from `start` looking for the config, stopping at a `.git` or the root.
+impl Discovered {
+  /// Both configs, nearest first — the order resolution reads them in.
+  pub fn configs(&self) -> Vec<PathBuf> {
+    self.package_config.iter().chain(std::iter::once(&self.root_config)).cloned().collect()
+  }
+}
+
+/// Walks up from `start` looking for configs, stopping at a `.git` or the filesystem root.
 pub fn discover(start: &Path) -> Result<Discovered, NotFound> {
   let started_from = start.to_path_buf();
   let mut package_dir = None;
+  let mut configs = Vec::new();
 
   for directory in start.ancestors() {
     if package_dir.is_none() && directory.join(PACKAGE_FILE).is_file() {
@@ -50,11 +70,7 @@ pub fn discover(start: &Path) -> Result<Discovered, NotFound> {
 
     let candidate = directory.join(CONFIG_FILE);
     if candidate.is_file() {
-      return Ok(Discovered {
-        config: candidate,
-        root: directory.to_path_buf(),
-        package_dir: package_dir.unwrap_or(started_from),
-      });
+      configs.push(candidate);
     }
 
     // Checked after the config, because a repository root normally holds both.
@@ -63,7 +79,20 @@ pub fn discover(start: &Path) -> Result<Discovered, NotFound> {
     }
   }
 
-  Err(NotFound { started_from })
+  let Some(root_config) = configs.last().cloned() else {
+    return Err(NotFound { started_from });
+  };
+
+  let root = root_config.parent().unwrap_or(Path::new("")).to_path_buf();
+  // `configs` holds at least the root config, so a second entry is a genuinely nearer one.
+  let package_config = (configs.len() > 1).then(|| configs.swap_remove(0));
+
+  Ok(Discovered {
+    root_config,
+    root,
+    package_config,
+    package_dir: package_dir.unwrap_or(started_from),
+  })
 }
 
 #[cfg(test)]
@@ -94,9 +123,45 @@ mod tests {
 
     let found = discover(&start).expect("finds the root config");
 
-    assert_eq!(found.config, dir.path().join(CONFIG_FILE));
+    assert_eq!(found.root_config, dir.path().join(CONFIG_FILE));
     assert_eq!(found.root, dir.path());
     assert_eq!(found.package_dir, start);
+    assert_eq!(found.package_config, None, "no package config means nothing to narrow");
+  }
+
+  /// The override case: both configs are recorded, and the root stays the repository
+  /// root rather than becoming the package the walk found first.
+  #[test]
+  fn a_package_config_and_a_root_config_are_both_recorded() {
+    let dir = fixture(&[
+      ".git/HEAD",
+      CONFIG_FILE,
+      "package.json",
+      "packages/legacy/package.json",
+      "packages/legacy/rune.config.ts",
+    ]);
+    let start = dir.path().join("packages/legacy");
+
+    let found = discover(&start).expect("finds both configs");
+
+    assert_eq!(found.root_config, dir.path().join(CONFIG_FILE));
+    assert_eq!(found.root, dir.path());
+    assert_eq!(found.package_config.as_deref(), Some(start.join(CONFIG_FILE).as_path()));
+    assert_eq!(found.package_dir, start);
+    assert_eq!(found.configs(), vec![start.join(CONFIG_FILE), dir.path().join(CONFIG_FILE)]);
+  }
+
+  /// A package with a config but no root config above it: that config *is* the root, and
+  /// there is nothing for it to narrow.
+  #[test]
+  fn the_only_config_is_the_root_config_wherever_it_sits() {
+    let dir = fixture(&[".git/HEAD", "packages/solo/package.json", "packages/solo/rune.config.ts"]);
+    let start = dir.path().join("packages/solo");
+
+    let found = discover(&start).expect("finds the config");
+
+    assert_eq!(found.root, start);
+    assert_eq!(found.package_config, None);
   }
 
   #[test]

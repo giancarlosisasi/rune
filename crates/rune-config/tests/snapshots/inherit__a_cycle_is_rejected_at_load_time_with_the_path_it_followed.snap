@@ -1,0 +1,10 @@
+---
+source: crates/rune-config/tests/inherit.rs
+description: two scripts extending each other
+expression: error
+---
+`extends` goes in a circle:
+
+  a → b → a
+
+a chain of `extends` has to end at a script with a `command`.

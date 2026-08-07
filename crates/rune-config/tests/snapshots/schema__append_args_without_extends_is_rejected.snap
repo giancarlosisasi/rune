@@ -1,0 +1,11 @@
+---
+source: crates/rune-config/tests/schema.rs
+description: appendArgs on a script that extends nothing
+expression: error
+---
+[TMP]/rune.config.ts is not a valid rune config
+
+script `test` sets `appendArgs` but does not extend anything
+
+`appendArgs` adds arguments to a command a script inherits, so it only means something
+next to `extends`. A script with a `command` of its own writes its arguments into it.

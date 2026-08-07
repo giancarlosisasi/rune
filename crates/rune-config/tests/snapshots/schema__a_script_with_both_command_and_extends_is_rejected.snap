@@ -1,0 +1,12 @@
+---
+source: crates/rune-config/tests/schema.rs
+description: a script declaring command and extends together
+expression: error
+---
+[TMP]/rune.config.ts is not a valid rune config
+
+script `ci` sets both `command` and `extends`
+
+a script is exactly one kind, so keep the one you meant and remove the other:
+  `command` runs a command of its own
+  `extends` builds on another script and adds to it

@@ -1,0 +1,14 @@
+---
+source: crates/rune-cli/tests/inheritance.rs
+description: a script a package overrides by extending it
+expression: "String::from_utf8_lossy(&output.stdout).replace(\"\\r\\n\", \"\\n\")"
+---
+test
+
+command      faketool.exe touch inspect-must-not-run.txt --maxWorkers=1
+directory    packages/legacy
+environment  NODE_ENV=test
+
+resolved through
+  rune.config.ts                  test  runs `faketool.exe touch inspect-must-not-run.txt`
+  packages/legacy/rune.config.ts  test  appends `--maxWorkers=1`

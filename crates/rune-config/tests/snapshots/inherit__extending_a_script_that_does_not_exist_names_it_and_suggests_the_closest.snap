@@ -1,0 +1,8 @@
+---
+source: crates/rune-config/tests/inherit.rs
+description: extending a name no script defines
+expression: error
+---
+script `ci` extends `tests`, which no script defines
+
+did you mean `test`?

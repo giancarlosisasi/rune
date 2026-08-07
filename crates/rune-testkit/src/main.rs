@@ -36,6 +36,7 @@ fn main() -> ExitCode {
     Some("isatty") => report_isatty(),
     Some("emit") => emit(&rest),
     Some("fail-once") => fail_once(rest.first().copied()),
+    Some("touch") => touch(rest.first().copied()),
     other => usage(other),
   }
 }
@@ -178,11 +179,27 @@ fn fail_once(state_file: Option<&str>) -> ExitCode {
   ExitCode::FAILURE
 }
 
+/// Leaves a file behind and exits.
+///
+/// The evidence that a process ran, readable after it is gone. A command that must never
+/// execute is tested by pointing it at this and asserting the file was never created —
+/// an assertion that fails loudly, unlike "we did not observe a spawn".
+fn touch(marker: Option<&str>) -> ExitCode {
+  let Some(marker) = marker else {
+    return fail("touch needs a path to create");
+  };
+
+  match std::fs::write(PathBuf::from(marker), "ran\n") {
+    Ok(()) => ExitCode::SUCCESS,
+    Err(error) => fail(&format!("cannot write {marker}: {error}")),
+  }
+}
+
 fn usage(unknown: Option<&str>) -> ExitCode {
   let named = unknown.unwrap_or("<nothing>");
   fail(&format!(
     "unknown subcommand `{named}`\n\nknown: report-env, ready-then-wait, exit-code, \
-     trap-term, spawn-grandchild, isatty, emit, fail-once"
+     trap-term, spawn-grandchild, isatty, emit, fail-once, touch"
   ))
 }
 

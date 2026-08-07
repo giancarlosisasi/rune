@@ -24,14 +24,14 @@ fn help_names_every_subcommand() {
   }
 }
 
-/// Test 1.3 — the message is temporary, the contract is permanent: rune's own failures
-/// exit non-zero and go to stderr, because stdout belongs to the child process.
+/// Test 1.3 — the contract every subcommand inherits: rune's own failures exit non-zero
+/// and go to stderr, because stdout belongs to the child process.
 #[test]
-fn unimplemented_subcommand_fails_on_stderr_with_empty_stdout() {
+fn a_failing_subcommand_reports_on_stderr_with_empty_stdout() {
   Test::new()
     .args(["inspect", "build"])
     .stdout("")
-    .stderr_regex(r"not implemented")
+    .stderr_regex(r"(?s)no rune\.config\.ts found")
     .status(1)
     .run();
 }

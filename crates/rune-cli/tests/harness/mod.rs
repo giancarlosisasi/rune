@@ -296,6 +296,28 @@ impl Test {
   }
 }
 
+/// The fixture monorepo: a root config, a package that narrows one of its scripts, and a
+/// package that does not.
+///
+/// Built in a temporary directory with no package manager anywhere near it — the layout
+/// is three files and two manifests, and installing a node_modules tree to get them would
+/// make every test that uses it depend on a network. `packages/legacy` is the package
+/// that needs one extra flag, which is the story this whole feature exists for.
+///
+/// `root_scripts` is spliced into the root config so a test can decide what the shared
+/// definitions actually run; `legacy_scripts` does the same for the overriding package.
+pub fn monorepo(root_scripts: &str, legacy_scripts: &str) -> Test {
+  Test::new()
+    .config(&format!("export default {{ scripts: {root_scripts} }};\n"))
+    .file("package.json", "{ \"name\": \"fixture-root\", \"private\": true }\n")
+    .file("packages/legacy/package.json", "{ \"name\": \"legacy\" }\n")
+    .file(
+      "packages/legacy/rune.config.ts",
+      &format!("export default {{ scripts: {legacy_scripts} }};\n"),
+    )
+    .file("packages/modern/package.json", "{ \"name\": \"modern\" }\n")
+}
+
 /// Blocks until `settled` reports true, or gives up after `limit`.
 ///
 /// Only for an operating system event that offers nothing to wait on — a process tree

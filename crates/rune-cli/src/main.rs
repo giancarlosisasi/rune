@@ -1,9 +1,12 @@
 use std::process::ExitCode;
 
 use clap::{Parser, Subcommand};
+use rune_config::inherit::Scope;
 
+mod inspect;
 mod list;
 mod run;
+mod script;
 
 #[derive(Parser)]
 #[command(name = "rune", version, about = "Centralized script runner for JS/TS monorepos")]
@@ -17,6 +20,9 @@ enum Command {
   /// Run a script by name
   Run {
     name: String,
+    /// Resolve against the root config only, ignoring this package's definitions
+    #[arg(long)]
+    root: bool,
     /// Arguments appended to the script's command, after `--`
     #[arg(last = true)]
     args: Vec<String>,
@@ -24,12 +30,22 @@ enum Command {
   /// List all available scripts
   List,
   /// Show how a script resolves and where it comes from
-  Inspect { name: String },
+  Inspect {
+    name: String,
+    /// Resolve against the root config only, ignoring this package's definitions
+    #[arg(long)]
+    root: bool,
+  },
   /// Manage the resolved-config cache
   Cache {
     #[command(subcommand)]
     command: CacheCommand,
   },
+}
+
+/// "Resolve as if you were standing at the root" is the whole of what `--root` means.
+fn scope(root_only: bool) -> Scope {
+  if root_only { Scope::Root } else { Scope::Nearest }
 }
 
 #[derive(Subcommand)]
@@ -44,13 +60,13 @@ fn main() -> ExitCode {
   match cli.command {
     // The child's exit code is the product of this subcommand, so it does not go through
     // the success-or-diagnostic path the others share.
-    Command::Run { name, args } => match run::run(&name, &args) {
+    Command::Run { name, root, args } => match run::run(&name, &args, scope(root)) {
       Ok(completion) => completion.exit_code(),
       Err(message) => fail(&message),
     },
     Command::List => report(list::run()),
     Command::Cache { command: CacheCommand::Clear } => report(list::clear_cache()),
-    Command::Inspect { name } => fail(&format!("inspect {name}: not implemented yet")),
+    Command::Inspect { name, root } => report(inspect::run(&name, scope(root))),
   }
 }
 

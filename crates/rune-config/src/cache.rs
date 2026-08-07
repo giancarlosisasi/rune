@@ -30,7 +30,8 @@ const CACHE_PATH: [&str; 3] = ["node_modules", ".cache", "rune"];
 /// was read and re-checking it on lookup gives the same guarantee at no cost.
 #[derive(Debug, Serialize, Deserialize)]
 struct Entry {
-  value: serde_json::Value,
+  /// One value per config that took part, in the order they were evaluated.
+  values: Vec<serde_json::Value>,
   env: BTreeMap<String, Option<String>>,
 }
 
@@ -52,30 +53,48 @@ impl Cache {
   }
 }
 
-/// Returns the cached result when the files and the variables it depended on are all
+/// Returns the cached results when every file and variable they depended on is
 /// unchanged. Any doubt at all is a miss.
-pub fn lookup(cache: &Cache, entry: &Path, environment: &Environment) -> Option<serde_json::Value> {
-  let key = key_for(entry)?;
+///
+/// `entries` are the configs that take part in resolution. One key covers all of them, so
+/// editing any one of them — or anything any one of them imports — misses.
+pub fn lookup(
+  cache: &Cache,
+  entries: &[PathBuf],
+  environment: &Environment,
+) -> Option<Vec<serde_json::Value>> {
+  let key = key_for(entries)?;
   let stored = std::fs::read_to_string(cache.entry_path(&key)).ok()?;
   let stored: Entry = serde_json::from_str(&stored).ok()?;
+
+  if stored.values.len() != entries.len() {
+    return None;
+  }
 
   // The files are already proven identical by the key. The variables are not.
   let unchanged =
     stored.env.iter().all(|(name, seen)| environment.get(name).map(str::to_owned) == *seen);
 
-  unchanged.then_some(stored.value)
+  unchanged.then_some(stored.values)
 }
 
 /// Best-effort write. A failure here costs a re-evaluation next time and nothing else.
-pub fn store(cache: &Cache, entry: &Path, _environment: &Environment, evaluated: &Evaluated) {
-  let Some(key) = key_for(entry) else {
+pub fn store(cache: &Cache, entries: &[PathBuf], evaluated: &[Evaluated]) {
+  let Some(key) = key_for(entries) else {
     return;
   };
   if std::fs::create_dir_all(&cache.directory).is_err() {
     return;
   }
 
-  let stored = Entry { value: evaluated.value.clone(), env: evaluated.observed_env.clone() };
+  // Every config saw the same environment, so a variable read by both was read with the
+  // same value; the union is what the next lookup has to re-check.
+  let mut env = BTreeMap::new();
+  for one in evaluated {
+    env.extend(one.observed_env.iter().map(|(name, value)| (name.clone(), value.clone())));
+  }
+
+  let stored = Entry { values: evaluated.iter().map(|one| one.value.clone()).collect(), env };
   if let Ok(serialized) = serde_json::to_string(&stored) {
     let _ = std::fs::write(cache.entry_path(&key), serialized);
   }
@@ -94,17 +113,23 @@ pub fn clear(root: &Path) -> std::io::Result<()> {
 ///
 /// The binary version is in the key because a rune upgrade may change how a config is
 /// interpreted; the platform is, because a config can branch on `rune.platform`.
-fn key_for(entry: &Path) -> Option<String> {
+///
+/// Every config's import closure goes into the one key. A key covering only the root
+/// config would serve a stale result the moment a package config changed, which is the
+/// worst failure a cache can produce: correct-looking output from the wrong definition.
+fn key_for(entries: &[PathBuf]) -> Option<String> {
   let mut hasher = blake3::Hasher::new();
   hasher.update(env!("CARGO_PKG_VERSION").as_bytes());
   hasher.update(PLATFORM.as_bytes());
 
-  for file in import_closure(entry)? {
-    let bytes = std::fs::read(&file).ok()?;
-    // The path is hashed too: moving a helper changes what the config means, even when
-    // its bytes do not.
-    hasher.update(file.to_string_lossy().as_bytes());
-    hasher.update(&bytes);
+  for entry in entries {
+    for file in import_closure(entry)? {
+      let bytes = std::fs::read(&file).ok()?;
+      // The path is hashed too: moving a helper changes what the config means, even when
+      // its bytes do not.
+      hasher.update(file.to_string_lossy().as_bytes());
+      hasher.update(&bytes);
+    }
   }
 
   Some(hasher.finalize().to_hex().to_string())
