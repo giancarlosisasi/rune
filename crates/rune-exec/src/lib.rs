@@ -99,8 +99,7 @@ fn wide_exit(_code: u32) -> ExitCode {
 /// Runs `request` to completion, with the child owning the terminal throughout.
 pub fn run(request: &ExecRequest<'_>) -> Result<Completion, ExecError> {
   let parent: Vec<(std::ffi::OsString, std::ffi::OsString)> = std::env::vars_os().collect();
-  let lookup =
-    |name: &str| parent.iter().find(|(key, _)| key == name).map(|(_, value)| value.as_os_str());
+  let lookup = |name: &str| environment::find(&parent, name);
 
   let shell = resolve_shell(lookup(SHELL_VARIABLE), lookup("PATH"), lookup("PATHEXT"))?;
   let directory = working_directory(request)?;

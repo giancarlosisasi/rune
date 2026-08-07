@@ -106,6 +106,21 @@ fn augmented_path(descriptor: &Descriptor<'_>, inherited: Option<&OsStr>) -> OsS
   })
 }
 
+/// Looks a variable up in a parent environment the way the operating system would.
+///
+/// Windows stores the search path as `Path`, not `PATH`. A case-sensitive scan for
+/// `PATH` therefore finds nothing at all, and whatever depended on it behaves as if the
+/// variable were unset — which is how a missing shell gets reported for a shell that is
+/// sitting in `System32`.
+pub fn find<'a>(parent: &'a [(OsString, OsString)], name: &str) -> Option<&'a OsStr> {
+  let wanted = lookup_key(name);
+
+  parent
+    .iter()
+    .find(|(key, _)| lookup_key(&key.to_string_lossy()) == wanted)
+    .map(|(_, value)| value.as_os_str())
+}
+
 fn lookup_key(name: &str) -> String {
   if cfg!(windows) { name.to_uppercase() } else { name.to_owned() }
 }
@@ -198,6 +213,23 @@ mod tests {
 
     assert_eq!(named.len(), 1, "{named:?}");
     assert_eq!(environment.get("PATH"), Some(OsStr::new(r"C:\only")));
+  }
+
+  /// The lookup that finds the shell. Windows hands a process `Path`, so a scan that
+  /// only matches `PATH` finds nothing and every bare shell name is reported missing.
+  #[test]
+  fn a_parent_variable_is_found_the_way_the_operating_system_names_it() {
+    let stored = parent(&[("Path", r"C:\Windows\System32"), ("PATHEXT", ".COM;.EXE")]);
+
+    assert_eq!(super::find(&stored, "PATHEXT"), Some(OsStr::new(".COM;.EXE")));
+    assert_eq!(super::find(&stored, "NOT_SET"), None);
+
+    let found = super::find(&stored, "PATH");
+    if cfg!(windows) {
+      assert_eq!(found, Some(OsStr::new(r"C:\Windows\System32")), "`Path` must answer `PATH`");
+    } else {
+      assert_eq!(found, None, "case is significant away from Windows");
+    }
   }
 
   #[test]
