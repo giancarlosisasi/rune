@@ -61,12 +61,34 @@ function assemblePlatform(outDirectory, entry, binaryPath, packageVersion) {
   return target;
 }
 
-// npm reports the name it gave the tarball, so nothing here has to predict it.
+// A packed tarball named the way npm has to be given it, which is absolutely.
+//
+// `npm install tarballs/rune-0.1.1.tgz` does not install a file. npm reads any argument
+// shaped like `owner/name` as a GitHub repository and goes looking for one over ssh. Only
+// a path it recognises as a path — absolute, or starting with `.` — is read as a file, and
+// the directory these scripts are given is whatever the caller typed.
+function tarballSpec(directory, tarball) {
+  return path.resolve(directory, tarball);
+}
+
+// The name npm gave the tarball, read out of what `npm pack --json` reported. npm 11
+// answers with an array of packed packages and npm 12 with an object keyed by package
+// name, so the shape is normalised before the one record is read. Predicting the file
+// name instead would put npm's naming rules in this repository, where they would rot.
+function tarballName(report) {
+  const [packed] = Array.isArray(report) ? report : Object.values(report);
+
+  if (!packed?.filename) {
+    throw new Error(`npm pack reported no tarball: ${JSON.stringify(report)}`);
+  }
+  return packed.filename;
+}
+
 function pack(directory, destination) {
   fs.mkdirSync(destination, { recursive: true });
   const report = runNpm(['pack', '--json', '--pack-destination', destination], { cwd: directory });
 
-  return JSON.parse(String(report))[0].filename;
+  return tarballName(JSON.parse(String(report)));
 }
 
 // Assemble and pack every package whose binary `binaryFor` can supply, and record what
@@ -123,4 +145,13 @@ if (require.main === module) {
   main();
 }
 
-module.exports = { PACKED, assembleMeta, assemblePlatform, pack, packRelease, version };
+module.exports = {
+  PACKED,
+  assembleMeta,
+  assemblePlatform,
+  pack,
+  packRelease,
+  tarballName,
+  tarballSpec,
+  version,
+};

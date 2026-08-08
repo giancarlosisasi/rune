@@ -11,7 +11,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const { runNpm } = require('./npm-cli');
-const { PACKED } = require('./dist');
+const { PACKED, tarballSpec } = require('./dist');
 const { plan, validatePins } = require('./release-plan');
 
 // npm reports it by code; a registry proxy in front of it may only say it in words.
@@ -122,7 +122,7 @@ async function publish({ directory, dryRun = false }) {
 
   const tarballs = new Map(packed.map((one) => [one.name, one.tarball]));
   for (const name of decided.publish) {
-    const tarball = path.join(directory, tarballs.get(name));
+    const tarball = tarballSpec(directory, tarballs.get(name));
     process.stdout.write(`publishing ${name}@${version} with npm ${npm}\n`);
 
     if (dryRun) {

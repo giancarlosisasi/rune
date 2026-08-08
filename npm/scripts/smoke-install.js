@@ -17,7 +17,7 @@ const os = require('node:os');
 const path = require('node:path');
 
 const platforms = require('../rune/lib/platforms');
-const { PACKED } = require('./dist');
+const { PACKED, tarballSpec } = require('./dist');
 const { runNpm } = require('./npm-cli');
 const { META } = require('./release-plan');
 
@@ -47,7 +47,7 @@ function install(project, tarballs, entry) {
       '--no-audit',
       '--no-fund',
       '--omit=optional',
-      ...wanted.map((one) => path.join(tarballs, one.tarball)),
+      ...wanted.map((one) => tarballSpec(tarballs, one.tarball)),
     ],
     { cwd: project },
   );
