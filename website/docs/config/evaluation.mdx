@@ -15,7 +15,7 @@ TypeScript syntax is erased before evaluation. Annotations, interfaces and type 
 runtime effect, and constructs that do carry runtime meaning keep it.
 
 ```ts title="rune.config.ts"
-import { defineConfig } from '@giancarlosio/rune';
+import { defineConfig } from '@gio-labs/rune';
 import { PACKAGES } from './scripts/packages';
 
 const enum Reporter {
@@ -82,7 +82,7 @@ rune evaluates this file with an embedded JavaScript engine, not Node.js, so Nod
 what does work:
   - `rune.env`, `rune.platform`, `rune.isCI`
   - relative imports of other files in this repository, such as `./scripts/helpers.ts`
-  - `import { defineConfig } from "@giancarlosio/rune"` — the one package rune supplies itself
+  - `import { defineConfig } from "@gio-labs/rune"` — the one package rune supplies itself
   - `import type` from any npm package — type-only imports are erased before evaluation
 ```
 
@@ -96,16 +96,16 @@ what does work:
 Type-only imports from npm packages are fine, because they are erased before anything runs:
 
 ```ts
-import type { Script } from '@giancarlosio/rune';
+import type { Script } from '@gio-labs/rune';
 ```
 
 ## The one package Rune supplies
 
-`@giancarlosio/rune` is answered from inside the binary rather than resolved from `node_modules`, so
+`@gio-labs/rune` is answered from inside the binary rather than resolved from `node_modules`, so
 the authoring style the types teach loads before a package manager has installed anything.
 
 ```ts
-import { defineConfig } from '@giancarlosio/rune';
+import { defineConfig } from '@gio-labs/rune';
 ```
 
 It exports `defineConfig` and nothing else, and `defineConfig` returns its argument unchanged — it

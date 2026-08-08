@@ -10,10 +10,10 @@ native binary for the current platform through optional dependencies, so nothing
 no postinstall script runs.
 
 <PackageManagerTabs command={{
-  npm: 'npm install --save-dev @giancarlosio/rune',
-  yarn: 'yarn add -D @giancarlosio/rune',
-  pnpm: 'pnpm add -D @giancarlosio/rune',
-  bun: 'bun add -d @giancarlosio/rune',
+  npm: 'npm install --save-dev @gio-labs/rune',
+  yarn: 'yarn add -D @gio-labs/rune',
+  pnpm: 'pnpm add -D @gio-labs/rune',
+  bun: 'bun add -d @gio-labs/rune',
 }} />
 
 Install it once, at the workspace root. Packages call the binary through `node_modules/.bin`,
@@ -62,7 +62,7 @@ export default {
 Rune finds the config by walking up from wherever it is invoked, so a run from `packages/api/src`
 uses the same config as a run from the root.
 
-Adding `import { defineConfig } from '@giancarlosio/rune'` and wrapping the object gives you editor
+Adding `import { defineConfig } from '@gio-labs/rune'` and wrapping the object gives you editor
 autocomplete. Rune supplies that module itself, so it works with nothing installed.
 
 ## Node version
