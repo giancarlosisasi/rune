@@ -28,7 +28,7 @@ pub fn working_directory() -> Result<PathBuf, String> {
 ///
 /// Shared by `run` and `inspect` so that the explanation and the run cannot disagree
 /// about which files took part or in what order.
-pub fn env_files<'a>(resolved: &'a Resolved<'_>) -> Vec<FileLayer<'a>> {
+pub fn env_files<'a>(resolved: &Resolved<'a>) -> Vec<FileLayer<'a>> {
   resolved
     .env_files
     .iter()

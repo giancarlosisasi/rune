@@ -5,9 +5,14 @@
 //! unbounded queue answers that difference by growing rune's own memory until something
 //! gives. Bounded, the producer waits instead — which is backpressure the child feels as
 //! a full pipe, exactly as it would without rune.
+//!
+//! Waiting here yields rather than blocks. A producer parked on a full queue must not
+//! stop the clock the rest of the run is using: a group whose output has nowhere to go
+//! still has to notice a failing member and still has to finish tearing its children down.
 
 use std::io::{self, Write};
-use std::sync::mpsc::{Receiver, SyncSender, sync_channel};
+
+use tokio::sync::mpsc::{Receiver, Sender, channel as bounded};
 
 use crate::multiplex::{Multiplexer, ScriptId, Stream};
 
@@ -32,17 +37,28 @@ pub enum Event {
 }
 
 /// A bounded queue from any number of producers to one writer.
-pub fn channel() -> (SyncSender<Event>, Receiver<Event>) {
-  sync_channel(CAPACITY)
+pub fn channel() -> (Sender<Event>, Receiver<Event>) {
+  bounded(CAPACITY)
 }
 
 /// Writes every event until the last producer is gone.
-pub fn pump<W: Write>(events: &Receiver<Event>, out: &mut Multiplexer<W>) -> io::Result<()> {
-  for event in events {
+///
+/// Stopping at the first write failure is deliberate. The one failure that happens in
+/// practice is the reader of rune's own output going away, and retrying into a closed
+/// pipe produces nothing but more failures.
+pub async fn pump<W: Write>(
+  events: &mut Receiver<Event>,
+  out: &mut Multiplexer<W>,
+) -> io::Result<()> {
+  while let Some(event) = events.recv().await {
     match event {
       Event::Chunk { script, stream, bytes } => out.write(script, stream, &bytes)?,
       Event::Finished { script } => out.finished(script)?,
     }
+
+    // Per event rather than per line: a chunk that carries a prompt or a repainted
+    // progress bar has no newline in it, and holding it back makes the script look hung.
+    out.flush()?;
   }
 
   out.finish_all()
@@ -50,7 +66,7 @@ pub fn pump<W: Write>(events: &Receiver<Event>, out: &mut Multiplexer<W>) -> io:
 
 #[cfg(test)]
 mod tests {
-  use std::sync::mpsc::TrySendError;
+  use tokio::sync::mpsc::error::TrySendError;
 
   use super::{CAPACITY, Event, channel, pump};
   use crate::color::{ColorLevel, Palette};
@@ -82,9 +98,9 @@ mod tests {
   }
 
   /// The consumer half of the seam, end to end with no processes anywhere near it.
-  #[test]
-  fn the_pump_writes_every_event_and_stops_when_the_producers_are_gone() {
-    let (sender, receiver) = channel();
+  #[tokio::test]
+  async fn the_pump_writes_every_event_and_stops_when_the_producers_are_gone() {
+    let (sender, mut receiver) = channel();
     let mut writer = Multiplexer::grouped(Vec::new(), Palette::new(&["a", "b"], ColorLevel::None));
 
     for event in [
@@ -94,11 +110,11 @@ mod tests {
       chunk(0, "a2\n"),
       Event::Finished { script: 0 },
     ] {
-      sender.send(event).expect("the receiver is alive");
+      sender.try_send(event).expect("the queue is empty and the receiver is alive");
     }
     drop(sender);
 
-    pump(&receiver, &mut writer).expect("a Vec never fails to accept bytes");
+    pump(&mut receiver, &mut writer).await.expect("a Vec never fails to accept bytes");
 
     let output = String::from_utf8(writer.into_inner()).expect("valid UTF-8");
     assert_eq!(output, "[b] b1\n[a] a1\n[a] a2\n");

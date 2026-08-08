@@ -158,6 +158,7 @@ fn discriminant_of(kind: &Kind) -> &'static str {
     Kind::Command(_) => "command",
     Kind::Extends { .. } => "extends",
     Kind::Serial { .. } => "serial",
+    Kind::Parallel { .. } => "parallel",
   }
 }
 

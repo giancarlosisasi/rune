@@ -1,26 +1,38 @@
-//! Running one script.
+//! Running what a script name stands for.
 //!
-//! The child gets rune's own standard input, output and error, untouched. Colors,
+//! A single script gets rune's own standard input, output and error, untouched. Colors,
 //! progress bars, watch-mode interfaces and interactive prompts therefore behave exactly
 //! as they do without rune, because rune is not between the child and the terminal — it
 //! is beside it, waiting.
+//!
+//! A group of scripts running at once cannot have that, because two children writing to
+//! one terminal produce output nobody can attribute. Those children are piped and their
+//! bytes are labelled on the way through. Which of the two a child gets is decided in
+//! exactly one place — [`spawn::Wiring`] — and never guessed at again.
+//!
+//! Internally this is an async runtime waiting on many children and many pipes at once.
+//! Nothing about that reaches a caller: every entry point here is an ordinary blocking
+//! function that answers with a [`Completion`].
 
 pub mod bin_paths;
 pub mod environment;
+mod group;
 pub mod quote;
 pub mod shell;
 mod signals;
+mod spawn;
 pub mod teardown;
 
 use std::collections::BTreeMap;
 use std::io;
 use std::path::{Path, PathBuf};
-use std::process::{Child, ExitCode, ExitStatus};
+use std::process::{ExitCode, ExitStatus};
 
 use thiserror::Error;
 
-use crate::environment::{Descriptor, FileLayer};
-use crate::shell::{SHELL_VARIABLE, Shell};
+use crate::environment::FileLayer;
+
+pub use crate::group::{Member, SuccessPolicy, Task};
 
 /// A script, resolved down to everything spawning it needs.
 pub struct ExecRequest<'a> {
@@ -40,6 +52,11 @@ pub struct ExecRequest<'a> {
   pub env: &'a BTreeMap<String, String>,
   /// The script's dotenv files, nearest to the script first.
   pub env_files: &'a [FileLayer<'a>],
+  /// The script owns the terminal even inside a group, and its siblings stay piped.
+  ///
+  /// Outside a group this changes nothing — a lone script already has the terminal. It is
+  /// how a watch interface survives being one member of a `dev` group.
+  pub interactive: bool,
 }
 
 #[derive(Debug, Error)]
@@ -55,6 +72,9 @@ pub enum ExecError {
 
   #[error("could not wait for `{script}`: {source}")]
   Wait { script: String, source: io::Error },
+
+  #[error("could not start the runner: {source}")]
+  Runtime { source: io::Error },
 }
 
 /// How a run finished.
@@ -100,109 +120,27 @@ fn wide_exit(_code: u32) -> ExitCode {
 
 /// Runs `request` to completion, with the child owning the terminal throughout.
 pub fn run(request: &ExecRequest<'_>) -> Result<Completion, ExecError> {
-  let parent: Vec<(std::ffi::OsString, std::ffi::OsString)> = std::env::vars_os().collect();
-  let lookup = |name: &str| environment::find(&parent, name);
-
-  let shell = resolve_shell(lookup(SHELL_VARIABLE), lookup("PATH"), lookup("PATHEXT"))?;
-  let directory = working_directory(request)?;
-
-  let layering = environment::build(
-    parent.iter().cloned(),
-    &Descriptor {
-      script_name: request.script_name,
-      root: request.root,
-      package_dir: request.package_dir,
-      env: request.env,
-      env_files: request.env_files,
-    },
-  );
-
-  // Before the child starts, and on stderr: an assignment that silently did nothing is
-  // how a wrong environment survives a week, and stdout belongs to the child.
-  for ignored in &layering.ignored {
-    rune_out::diagnostic(&format!("warning: {ignored}"));
-  }
-
-  // Quoting can only happen once the shell is known: the same argument needs three
-  // different spellings depending on which of them is about to read the line.
-  let command_line = quote::command_line(request.command, request.arguments, shell.kind);
-
-  let mut command = shell.command(&command_line);
-  command.current_dir(&directory).env_clear().envs(layering.environment.iter());
-
-  let (mut child, _teardown) = signals::spawn(&mut command, attach).map_err(|error| {
-    let shell = shell.program.display().to_string();
-    if error.kind() == io::ErrorKind::NotFound {
-      ExecError::ShellNotFound { shell }
-    } else {
-      ExecError::ShellNotRunnable { shell, source: error }
-    }
-  })?;
-
-  let status = wait(&mut child, request.script_name);
-  signals::forget();
-
-  Ok(Completion { code: code_of(status?), caught_signal: signals::caught() })
+  runtime()?.block_on(group::alone(request))
 }
 
-fn wait(child: &mut Child, script: &str) -> Result<ExitStatus, ExecError> {
-  child.wait().map_err(|source| ExecError::Wait { script: script.to_owned(), source })
+/// Runs everything `task` stands for, however many children that turns out to be.
+pub fn run_task(task: &Task<'_>) -> Result<Completion, ExecError> {
+  runtime()?.block_on(group::execute(task))
 }
 
-fn resolve_shell(
-  configured: Option<&std::ffi::OsStr>,
-  path: Option<&std::ffi::OsStr>,
-  path_extensions: Option<&std::ffi::OsStr>,
-) -> Result<Shell, ExecError> {
-  let shell = Shell::select(configured);
-  let Some(program) = shell::locate(&shell.program, path, path_extensions) else {
-    return Err(ExecError::ShellNotFound { shell: shell.program.display().to_string() });
-  };
-
-  Ok(Shell { program, kind: shell.kind })
-}
-
-/// Checked before spawning, because a missing directory otherwise surfaces as the same
-/// "not found" the operating system reports for a missing shell.
-fn working_directory(request: &ExecRequest<'_>) -> Result<PathBuf, ExecError> {
-  let directory = match request.cwd {
-    Some(cwd) if cwd.is_absolute() => cwd.to_path_buf(),
-    Some(cwd) => request.package_dir.join(cwd),
-    None => request.package_dir.to_path_buf(),
-  };
-
-  if directory.is_dir() {
-    return Ok(directory);
-  }
-
-  Err(ExecError::WorkingDirectory {
-    script: request.script_name.to_owned(),
-    directory,
-    source: io::Error::from(io::ErrorKind::NotFound),
-  })
-}
-
-/// Binds the platform teardown handle to a child that has just been spawned.
+/// One thread, and only the drivers rune uses.
 ///
-/// The returned value is held for the lifetime of the run: on Windows it is the job
-/// handle whose closing kills the tree.
-#[cfg(windows)]
-fn attach(child: &Child) -> io::Result<Option<teardown::JobObject>> {
-  let job = teardown::JobObject::new()?;
-  job.adopt(child)?;
-  Ok(Some(job))
+/// Current-thread on purpose: every future here borrows the run's own data, which a work
+/// stealing runtime could not accept without making all of it `'static` and `Send` first.
+fn runtime() -> Result<tokio::runtime::Runtime, ExecError> {
+  tokio::runtime::Builder::new_current_thread()
+    .enable_all()
+    .build()
+    .map_err(|source| ExecError::Runtime { source })
 }
 
 #[cfg(unix)]
-fn attach(_child: &Child) -> io::Result<Option<()>> {
-  // An interactive child stays in rune's process group, so the terminal's own signal
-  // delivery reaches it and reading the terminal cannot stop it. Teardown for piped and
-  // kill-capable children is built in `teardown` and used by parallel runs.
-  Ok(None)
-}
-
-#[cfg(unix)]
-fn code_of(status: ExitStatus) -> u32 {
+pub(crate) fn code_of(status: ExitStatus) -> u32 {
   use std::os::unix::process::ExitStatusExt as _;
 
   status.code().map_or_else(
@@ -212,6 +150,6 @@ fn code_of(status: ExitStatus) -> u32 {
 }
 
 #[cfg(windows)]
-fn code_of(status: ExitStatus) -> u32 {
+pub(crate) fn code_of(status: ExitStatus) -> u32 {
   status.code().unwrap_or(1).cast_unsigned()
 }

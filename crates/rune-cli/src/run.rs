@@ -1,21 +1,27 @@
 //! `rune run <name>`.
 //!
-//! A name may stand for one command or for a whole ordered run. Both go through the same
-//! loop here: resolve a plan, then execute its steps one at a time, with the child owning
-//! the terminal throughout. One child at a time is what keeps the output of a chained
-//! script indistinguishable from the output of running its command directly.
+//! A name may stand for one command, an ordered run, or a set of scripts running at once.
+//! All three are resolved here into one task: every command the run could reach is looked
+//! up before anything starts, so a typo in the third member of a chain is reported before
+//! the first two have run and had effects.
+//!
+//! Resolving and running are kept apart on purpose. This module knows what a name means;
+//! `rune-exec` knows how to make it happen. Neither has to know the other's job.
 
+use std::collections::BTreeMap;
 use std::path::Path;
 
 use rune_config::compose::Plan;
 use rune_config::env::PLATFORM;
 use rune_config::inherit::{Runs, Scope};
 use rune_config::load::Loaded;
-use rune_exec::{Completion, ExecRequest};
+use rune_config::schema::SuccessPolicy;
+use rune_exec::environment::FileLayer;
+use rune_exec::{Completion, ExecRequest, Member, Task};
 
 use crate::script::{env_files, load_here, unknown};
 
-/// Resolves `name` and runs everything it stands for, in order.
+/// Resolves `name` and runs everything it stands for.
 ///
 /// `arguments` are what the user typed after `--`. They go last, after everything the
 /// configuration contributed along the extension chain, because the config is the default
@@ -25,91 +31,157 @@ pub fn run(name: &str, arguments: &[String], scope: Scope) -> Result<Completion,
   let resolved =
     loaded.resolve(name, scope).map_err(stringify)?.ok_or_else(|| unknown(name, &loaded, scope))?;
 
-  if !arguments.is_empty() && matches!(resolved.runs, Runs::Serial { .. }) {
+  if !arguments.is_empty() && !matches!(resolved.runs, Runs::Command(_)) {
     return Err(arguments_for_a_group(name));
   }
 
   let plan =
     loaded.plan(name, scope).map_err(stringify)?.ok_or_else(|| unknown(name, &loaded, scope))?;
 
-  execute(&plan, &Run { loaded: &loaded, scope, entry: name, arguments })
+  let run = Run { loaded: &loaded, scope, entry: name, arguments };
+  let mut commands = Vec::new();
+  prepare(&plan, &run, &mut commands)?;
+
+  let mut next = 0;
+  let task = compose(&plan, &commands, &loaded, &mut next);
+
+  rune_exec::run_task(&task).map_err(stringify)
 }
 
-/// What every step of one invocation shares.
+/// What every command of one invocation shares.
 struct Run<'a> {
   loaded: &'a Loaded,
   scope: Scope,
-  /// The name the user typed, which is the only step the arguments after `--` reach.
-  /// A prerequisite was not asked for by name, so it does not receive them.
+  /// The name the user typed, which is the only command the arguments after `--` reach.
+  /// A prerequisite or a group member was not asked for by name, so it does not receive
+  /// them.
   entry: &'a str,
   arguments: &'a [String],
 }
 
-fn execute(plan: &Plan, run: &Run<'_>) -> Result<Completion, String> {
-  match plan {
-    Plan::Command { script } => one(script, run),
-    Plan::Serial { steps, continue_on_error } => sequence(steps, *continue_on_error, run),
+/// One command of a plan, resolved and owned so that a request can borrow it.
+///
+/// Everything a plan can reach is prepared before anything runs. A member that starts at
+/// the same moment as its siblings has no useful place to report "no such script" from.
+struct Prepared<'a> {
+  script: String,
+  command: &'a str,
+  arguments: Vec<String>,
+  cwd: Option<&'a str>,
+  env: BTreeMap<String, String>,
+  files: Vec<FileLayer<'a>>,
+  interactive: bool,
+}
+
+impl Prepared<'_> {
+  fn request<'r>(&'r self, loaded: &'r Loaded) -> ExecRequest<'r> {
+    ExecRequest {
+      script_name: &self.script,
+      command: self.command,
+      arguments: &self.arguments,
+      root: &loaded.discovered.root,
+      package_dir: &loaded.discovered.package_dir,
+      cwd: self.cwd.map(Path::new),
+      env: &self.env,
+      env_files: &self.files,
+      interactive: self.interactive,
+    }
   }
 }
 
-/// Runs `steps` one at a time and reports how the whole sequence ended.
-fn sequence(steps: &[Plan], continue_on_error: bool, run: &Run<'_>) -> Result<Completion, String> {
-  let mut failure = None;
-  let mut caught = None;
-
-  for step in steps {
-    // Nothing new starts once a signal has arrived. The flag travels with the previous
-    // step's result rather than in a global, so a caller cannot silently skip reading it.
-    if caught.is_some() {
-      break;
+/// Resolves every command the plan can reach, in the order the plan holds them.
+fn prepare<'a>(plan: &Plan, run: &Run<'a>, into: &mut Vec<Prepared<'a>>) -> Result<(), String> {
+  match plan {
+    Plan::Command { script } => into.push(one(script, run)?),
+    Plan::Serial { steps, .. } => {
+      for step in steps {
+        prepare(step, run, into)?;
+      }
     }
-
-    let completion = execute(step, run)?;
-    caught = caught.or(completion.caught_signal);
-
-    if completion.code != 0 {
-      // The first failure's code, never the last. In a serial run first-in-time is also
-      // first-in-list, so it is the failure the user reads at the top of the log.
-      failure.get_or_insert(completion.code);
-
-      if !continue_on_error {
-        break;
+    Plan::Parallel { members, .. } => {
+      for member in members {
+        prepare(&member.plan, run, into)?;
       }
     }
   }
 
-  Ok(Completion { code: failure.unwrap_or(0), caught_signal: caught })
+  Ok(())
 }
 
-fn one(script: &str, run: &Run<'_>) -> Result<Completion, String> {
+/// Turns the plan into the task rune-exec runs, drawing commands in the order `prepare`
+/// resolved them.
+fn compose<'a>(
+  plan: &Plan,
+  commands: &'a [Prepared<'_>],
+  loaded: &'a Loaded,
+  next: &mut usize,
+) -> Task<'a> {
+  match plan {
+    Plan::Command { .. } => {
+      let prepared = &commands[*next];
+      *next += 1;
+      Task::Command(prepared.request(loaded))
+    }
+    Plan::Serial { steps, continue_on_error } => Task::Serial {
+      steps: steps.iter().map(|step| compose(step, commands, loaded, next)).collect(),
+      continue_on_error: *continue_on_error,
+    },
+    Plan::Parallel { members, continue_on_error, policy } => Task::Parallel {
+      members: members
+        .iter()
+        .map(|member| Member {
+          name: member.name.clone(),
+          task: compose(&member.plan, commands, loaded, next),
+        })
+        .collect(),
+      continue_on_error: *continue_on_error,
+      policy: policy_of(*policy),
+    },
+  }
+}
+
+/// The same three choices, spelled for the crate that acts on them. rune-config describes
+/// what a config said; rune-exec decides what to do about it, and neither depends on the
+/// other's vocabulary.
+fn policy_of(policy: SuccessPolicy) -> rune_exec::SuccessPolicy {
+  match policy {
+    SuccessPolicy::All => rune_exec::SuccessPolicy::All,
+    SuccessPolicy::First => rune_exec::SuccessPolicy::First,
+    SuccessPolicy::Last => rune_exec::SuccessPolicy::Last,
+  }
+}
+
+fn one<'a>(script: &str, run: &Run<'a>) -> Result<Prepared<'a>, String> {
   let resolved = run
     .loaded
     .resolve(script, run.scope)
     .map_err(stringify)?
     .ok_or_else(|| unknown(script, run.loaded, run.scope))?;
 
-  let command = resolved.command().expect("a plan names a script's own command, never a group");
-
-  let mut all_arguments = resolved.append_args.clone();
-  if script == run.entry {
-    all_arguments.extend_from_slice(run.arguments);
-  }
-  let files = env_files(&resolved);
-
-  let request = ExecRequest {
-    script_name: script,
+  let command = resolved
+    .command()
+    .expect("a plan names a script's own command, never a group")
     // `PLATFORM` is the same constant a config reads as `rune.platform`, so a config
     // branching by hand and a per-OS object cannot disagree about which system this is.
-    command: command.select(PLATFORM),
-    arguments: &all_arguments,
-    root: &run.loaded.discovered.root,
-    package_dir: &run.loaded.discovered.package_dir,
-    cwd: resolved.cwd.map(Path::new),
-    env: &resolved.env,
-    env_files: &files,
-  };
+    .select(PLATFORM);
+  let cwd = resolved.cwd;
+  let interactive = resolved.interactive;
+  let files = env_files(&resolved);
 
-  rune_exec::run(&request).map_err(stringify)
+  let mut arguments = resolved.append_args;
+  if script == run.entry {
+    arguments.extend_from_slice(run.arguments);
+  }
+
+  Ok(Prepared {
+    script: script.to_owned(),
+    command,
+    arguments,
+    cwd,
+    env: resolved.env,
+    files,
+    interactive,
+  })
 }
 
 /// Dropping the arguments silently is the failure worth avoiding: the group runs, looks

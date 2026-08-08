@@ -38,6 +38,14 @@ impl ColorLevel {
   /// behind this, which is a port of the same detection the JavaScript tools use. One
   /// answer for rune's prefixes and for its children beats two that disagree.
   pub fn detect() -> Self {
+    // `0` is what rune itself writes into `FORCE_COLOR` to tell a child "no color", so it
+    // has to mean the same thing when rune reads it. The crate behind this reads it only
+    // as "nothing forced", which under a terminal leaves rune coloring its own prefixes
+    // while telling its children not to color theirs.
+    if std::env::var(COLOR_VARIABLE).is_ok_and(|level| level == "0" || level == "false") {
+      return Self::None;
+    }
+
     let Some(support) = supports_color::on(supports_color::Stream::Stdout) else {
       return Self::None;
     };
@@ -173,6 +181,22 @@ mod tests {
     assert_eq!(forced_color(ColorLevel::Ansi256, None), Some("2"));
     assert_eq!(forced_color(ColorLevel::None, None), None, "nothing to forward");
     assert_eq!(forced_color(ColorLevel::TrueColor, Some("0")), None, "the user decides");
+  }
+
+  /// The value rune writes and the value rune reads have to mean the same thing. They did
+  /// not: under a terminal, `FORCE_COLOR=0` left rune coloring its own prefixes while
+  /// handing every child the same `0` and telling it not to.
+  ///
+  /// Both spellings in one test because the variable is process-wide: the workspace runs
+  /// each test in a process of its own, which is what makes writing it safe at all.
+  #[test]
+  fn a_force_color_of_zero_turns_runes_own_color_off() {
+    for spelling in ["0", "false"] {
+      // SAFETY: nextest gives every test its own process, so no other thread is reading
+      // the environment while this writes it.
+      unsafe { std::env::set_var(super::COLOR_VARIABLE, spelling) };
+      assert_eq!(ColorLevel::detect(), ColorLevel::None, "`{spelling}` must mean no color");
+    }
   }
 
   #[test]

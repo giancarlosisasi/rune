@@ -13,6 +13,8 @@
 //!   watch modes and prompts that inherited stdio exists to preserve.
 //!
 //! One rule spans both: a process that has already exited is never an error to kill.
+//! Every entry point here answers rather than fails when its target has gone, which is
+//! what keeps "a sibling exited a moment before we reached it" out of the error paths.
 
 #[cfg(unix)]
 pub use self::unix::*;
@@ -60,6 +62,66 @@ mod unix {
     command.process_group(0);
   }
 
+  /// One child's whole process tree, and the one way to end it.
+  ///
+  /// A child rune placed in a process group of its own is torn down as that group, which
+  /// is what reaches the grandchildren. An interactive child stayed in rune's group, so
+  /// signalling the group would signal rune too — it is signalled alone, and that
+  /// narrower reach is the documented cost of keeping the terminal.
+  #[derive(Debug, Clone)]
+  pub struct Tree {
+    leader: u32,
+    own_group: bool,
+  }
+
+  impl Tree {
+    pub fn own_group(leader: u32) -> Self {
+      Self { leader, own_group: true }
+    }
+
+    pub fn in_runes_group(leader: u32) -> Self {
+      Self { leader, own_group: false }
+    }
+
+    /// The process this tree is named by.
+    pub fn leader(&self) -> u32 {
+      self.leader
+    }
+
+    /// Asks the tree to end: `SIGTERM`, which a child may catch and act on.
+    pub fn terminate(&self) -> io::Result<()> {
+      self.deliver(Signal::SIGTERM)
+    }
+
+    /// Ends the tree whatever it wanted. Nothing can catch `SIGKILL`.
+    pub fn kill(&self) -> io::Result<()> {
+      self.deliver(Signal::SIGKILL)
+    }
+
+    /// Whether anything of the tree is left.
+    pub fn is_running(&self) -> bool {
+      let Ok(raw) = i32::try_from(self.leader) else {
+        return false;
+      };
+
+      let asked = if self.own_group {
+        signal::killpg(Pid::from_raw(raw), None)
+      } else {
+        signal::kill(Pid::from_raw(raw), None)
+      };
+
+      !matches!(asked, Err(Errno::ESRCH))
+    }
+
+    fn deliver(&self, signal: Signal) -> io::Result<()> {
+      if self.own_group {
+        signal_group(self.leader, signal)
+      } else {
+        signal_process(self.leader, signal)
+      }
+    }
+  }
+
   fn forgive_missing(result: Result<(), Errno>) -> io::Result<()> {
     match result {
       Ok(()) | Err(Errno::ESRCH) => Ok(()),
@@ -72,8 +134,8 @@ mod unix {
 mod windows {
   use std::io;
   use std::mem;
-  use std::os::windows::io::AsRawHandle as _;
-  use std::process::Child;
+  use std::os::windows::io::RawHandle;
+  use std::rc::Rc;
 
   use windows_sys::Win32::Foundation::{CloseHandle, FALSE, HANDLE};
   use windows_sys::Win32::System::JobObjects::{
@@ -131,8 +193,8 @@ mod windows {
     }
 
     /// Adds a freshly spawned child. Its own children join automatically.
-    pub fn adopt(&self, child: &Child) -> io::Result<()> {
-      let assigned = unsafe { AssignProcessToJobObject(self.handle, child.as_raw_handle().cast()) };
+    pub fn adopt(&self, process: RawHandle) -> io::Result<()> {
+      let assigned = unsafe { AssignProcessToJobObject(self.handle, process.cast()) };
 
       if assigned == FALSE { Err(io::Error::last_os_error()) } else { Ok(()) }
     }
@@ -148,6 +210,48 @@ mod windows {
   impl Drop for JobObject {
     fn drop(&mut self) {
       unsafe { CloseHandle(self.handle) };
+    }
+  }
+
+  /// What a terminated tree reports as its exit code.
+  ///
+  /// One is the ordinary "this failed" byte. A job termination has no code of its own to
+  /// propagate, and inventing a wide one here would be indistinguishable from a real
+  /// status the child chose.
+  const TERMINATED: u32 = 1;
+
+  /// One child's whole process tree, and the one way to end it.
+  ///
+  /// The job holds the whole tree because membership is inherited, so a grandchild is
+  /// reached without ever being named. Windows has no gentle form of this: a job is
+  /// terminated or it is not, which is why [`Tree::terminate`] and [`Tree::kill`] do the
+  /// same thing here and the escalation timer only ever has work to do on POSIX.
+  #[derive(Debug, Clone)]
+  pub struct Tree {
+    job: Rc<JobObject>,
+    leader: u32,
+  }
+
+  impl Tree {
+    pub fn new(job: Rc<JobObject>, leader: u32) -> Self {
+      Self { job, leader }
+    }
+
+    /// The process this tree is named by.
+    pub fn leader(&self) -> u32 {
+      self.leader
+    }
+
+    pub fn terminate(&self) -> io::Result<()> {
+      self.kill()
+    }
+
+    pub fn kill(&self) -> io::Result<()> {
+      self.job.terminate(TERMINATED)
+    }
+
+    pub fn is_running(&self) -> bool {
+      is_running(self.leader)
     }
   }
 
@@ -168,7 +272,11 @@ mod windows {
 
 #[cfg(test)]
 mod tests {
-  use super::is_running;
+  use super::{Tree, is_running};
+
+  /// A process id no run will ever hand out, for asking what happens to something that
+  /// has already gone.
+  const GONE: u32 = u32::MAX - 1;
 
   #[test]
   fn this_process_is_running() {
@@ -179,6 +287,38 @@ mod tests {
   /// have already gone. It must answer, not fail.
   #[test]
   fn an_impossible_process_id_is_not_running() {
-    assert!(!is_running(u32::MAX - 1));
+    assert!(!is_running(GONE));
+  }
+
+  /// Test 5c.5, the branch with no clock in it.
+  ///
+  /// Every teardown asks this of a member that may have exited a moment earlier, on every
+  /// path out of a run. Reporting a failure for it would turn an ordinary race into an
+  /// error the user is shown.
+  #[test]
+  fn ending_a_tree_that_has_already_gone_is_not_an_error() {
+    for tree in gone_trees() {
+      assert!(tree.terminate().is_ok(), "asking a departed tree to end must not fail");
+      assert!(tree.kill().is_ok(), "ending a departed tree must not fail");
+      assert!(!tree.is_running());
+    }
+  }
+
+  #[cfg(unix)]
+  fn gone_trees() -> Vec<Tree> {
+    vec![Tree::own_group(GONE), Tree::in_runes_group(GONE)]
+  }
+
+  #[cfg(windows)]
+  fn gone_trees() -> Vec<Tree> {
+    use std::rc::Rc;
+
+    use super::JobObject;
+
+    // An empty job stands for the same thing a departed process group does: there is
+    // nothing left in it to end.
+    let job = Rc::new(JobObject::new().expect("create a job object"));
+
+    vec![Tree::new(job, GONE)]
   }
 }

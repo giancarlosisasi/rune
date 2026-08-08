@@ -15,7 +15,7 @@ use std::path::{Path, PathBuf};
 use thiserror::Error;
 
 use crate::envfile::{self, EnvFile, EnvFileError};
-use crate::schema::{Command, Config, Kind, Script};
+use crate::schema::{Command, Config, Kind, Script, SuccessPolicy};
 use crate::suggest::{closest, did_you_mean};
 
 /// One config taking part in resolution.
@@ -81,6 +81,8 @@ pub struct Resolved<'a> {
   pub depends_on: &'a [String],
   pub description: Option<&'a str>,
   pub cwd: Option<&'a str>,
+  /// The script keeps rune's own terminal even as one member of a group.
+  pub interactive: bool,
   pub env: BTreeMap<String, String>,
   /// The dotenv files the chain declares, nearest to the script first.
   ///
@@ -96,7 +98,7 @@ impl<'a> Resolved<'a> {
   pub fn command(&self) -> Option<&'a Command> {
     match self.runs {
       Runs::Command(command) => Some(command),
-      Runs::Serial { .. } => None,
+      Runs::Serial { .. } | Runs::Parallel { .. } => None,
     }
   }
 }
@@ -108,6 +110,8 @@ pub enum Runs<'a> {
   Command(&'a Command),
   /// Other scripts, one at a time, in the order written.
   Serial { members: &'a [String], continue_on_error: bool },
+  /// Other scripts, all at once.
+  Parallel { members: &'a [String], continue_on_error: bool, policy: SuccessPolicy },
 }
 
 /// One step of a resolution: a definition, and what it contributed.
@@ -150,7 +154,7 @@ pub fn resolve<'a>(
       return Err(missing_target(layers, floor, &walked, key, target));
     };
 
-    if matches!(next.2.kind, Kind::Serial { .. }) {
+    if matches!(next.2.kind, Kind::Serial { .. } | Kind::Parallel { .. }) {
       return Err(InheritError::ExtendsGroup { script: key.to_owned(), target: target.to_owned() });
     }
 
@@ -233,6 +237,7 @@ fn merge<'a>(layers: &'a [Layer], walked: &[Step<'a>]) -> Resolved<'a> {
   let mut depends_on: &[String] = &[];
   let mut description = None;
   let mut cwd = None;
+  let mut interactive = false;
   let mut env: BTreeMap<String, String> = BTreeMap::new();
   let mut env_files = Vec::new();
   let mut chain = Vec::with_capacity(walked.len());
@@ -245,6 +250,11 @@ fn merge<'a>(layers: &'a [Layer], walked: &[Step<'a>]) -> Resolved<'a> {
       }
       Kind::Serial { members, continue_on_error } => {
         runs = Some(Runs::Serial { members, continue_on_error: *continue_on_error });
+        &[]
+      }
+      Kind::Parallel { members, continue_on_error, policy } => {
+        runs =
+          Some(Runs::Parallel { members, continue_on_error: *continue_on_error, policy: *policy });
         &[]
       }
       Kind::Extends { append_args, .. } => append_args,
@@ -261,6 +271,9 @@ fn merge<'a>(layers: &'a [Layer], walked: &[Step<'a>]) -> Resolved<'a> {
     }
     if script.cwd.is_some() {
       cwd = script.cwd.as_deref();
+    }
+    if let Some(declared) = script.interactive {
+      interactive = declared;
     }
     // Per key, never whole-map: a package adding one variable must not discard the
     // base's others.
@@ -287,6 +300,7 @@ fn merge<'a>(layers: &'a [Layer], walked: &[Step<'a>]) -> Resolved<'a> {
     depends_on,
     description,
     cwd,
+    interactive,
     env,
     env_files,
     chain,
@@ -306,7 +320,9 @@ mod tests {
   fn command_of<'a>(resolved: &Resolved<'a>) -> &'a str {
     match resolved.runs {
       Runs::Command(command) => command.select(PLATFORM),
-      Runs::Serial { .. } => panic!("resolved to a group rather than a command"),
+      Runs::Serial { .. } | Runs::Parallel { .. } => {
+        panic!("resolved to a group rather than a command")
+      }
     }
   }
 

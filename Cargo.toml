@@ -37,6 +37,21 @@ anstyle = "1"
 # the `FORCE_COLOR` value a JavaScript tool reads.
 supports-color = "3"
 
+# Waiting on many children and many pipes at once. Only the drivers rune actually uses:
+# no `rt-multi-thread`, because every future here runs on one thread and borrows the
+# run's data, and no `net`, because rune opens no sockets.
+tokio = { version = "1", features = [
+  "rt",
+  "process",
+  "io-util",
+  "time",
+  "macros",
+  "sync",
+] }
+# `FuturesUnordered`, for awaiting whichever group member finishes next. Tokio's own
+# `JoinSet` needs `'static` tasks, which borrowed run data cannot be.
+futures-util = { version = "0.3", default-features = false, features = ["std"] }
+
 # Platform primitives for process control. `nix` covers setpgid/killpg and sigaction;
 # `windows-sys` covers Job Objects and console control events.
 nix = { version = "0.31", features = ["fs", "process", "signal"] }

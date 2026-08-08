@@ -10,8 +10,10 @@ repository.workspace = true
 workspace = true
 
 [dependencies]
+futures-util = { workspace = true }
 rune-out = { path = "../rune-out" }
 thiserror = { workspace = true }
+tokio = { workspace = true }
 
 [target.'cfg(unix)'.dependencies]
 nix = { workspace = true }

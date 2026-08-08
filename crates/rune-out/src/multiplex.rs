@@ -115,6 +115,15 @@ impl<W: Write> Multiplexer<W> {
     Ok(())
   }
 
+  /// Pushes whatever is buffered out to where it is going.
+  ///
+  /// A terminal's own buffering holds a line until it ends, and a child asking a question
+  /// or repainting a progress bar has not ended one. Waiting for a newline that is not
+  /// coming makes a running script look hung.
+  pub fn flush(&mut self) -> io::Result<()> {
+    self.out.flush()
+  }
+
   pub fn into_inner(self) -> W {
     self.out
   }

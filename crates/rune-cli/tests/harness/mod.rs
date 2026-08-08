@@ -345,13 +345,20 @@ pub fn monorepo(root_scripts: &str, legacy_scripts: &str) -> Test {
 /// Only for an operating system event that offers nothing to wait on — a process tree
 /// finishing its own teardown, for instance. Never for synchronizing with a fixture:
 /// those announce themselves with [`READY`].
+///
+/// The pause between attempts is what makes it usable at all. `settled` often takes a
+/// lock that the thread producing the answer also needs, and a loop that only yields can
+/// hold that thread out for the whole limit — the wait then fails while the evidence it
+/// was waiting for sits ready to be appended.
 pub fn wait_until(limit: std::time::Duration, settled: impl Fn() -> bool) -> bool {
+  const ATTEMPT: std::time::Duration = std::time::Duration::from_millis(1);
+
   let deadline = std::time::Instant::now() + limit;
   while std::time::Instant::now() < deadline {
     if settled() {
       return true;
     }
-    std::thread::yield_now();
+    std::thread::sleep(ATTEMPT);
   }
 
   settled()
@@ -366,6 +373,61 @@ pub fn read_ready(stdout: &mut std::process::ChildStdout) -> String {
   std::io::BufReader::new(stdout).read_line(&mut line).expect("read the readiness token");
   assert!(line.starts_with(READY), "expected a readiness token, got {line:?}");
   line
+}
+
+/// Puts rune where an interrupt can be aimed at it alone, rather than at the test running
+/// it. A terminal does the same thing to whatever it has in the foreground.
+#[cfg(unix)]
+pub fn interruptible(command: &mut Command) -> &mut Command {
+  use std::os::unix::process::CommandExt as _;
+
+  command.stdin(Stdio::null()).process_group(0)
+}
+
+#[cfg(windows)]
+pub fn interruptible(command: &mut Command) -> &mut Command {
+  use std::os::windows::process::CommandExt as _;
+
+  /// Delivering an event to one group means creating that group. The flag belongs to the
+  /// test, never to rune's own children — on those it would stop console events reaching
+  /// them, which is the behavior under test.
+  const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
+
+  command.stdin(Stdio::null()).creation_flags(CREATE_NEW_PROCESS_GROUP)
+}
+
+/// Interrupts rune the way its terminal would.
+#[cfg(unix)]
+pub fn interrupt(child: &std::process::Child) {
+  use nix::sys::signal::{Signal, kill};
+  use nix::unistd::Pid;
+
+  let group = i32::try_from(child.id()).expect("a process id fits");
+  kill(Pid::from_raw(-group), Signal::SIGINT).expect("interrupt the group");
+}
+
+#[cfg(windows)]
+pub fn interrupt(child: &std::process::Child) {
+  use windows_sys::Win32::System::Console::{CTRL_BREAK_EVENT, GenerateConsoleCtrlEvent};
+
+  let delivered = unsafe { GenerateConsoleCtrlEvent(CTRL_BREAK_EVENT, child.id()) };
+  assert!(
+    delivered != 0,
+    "cannot deliver a console control event: {}",
+    std::io::Error::last_os_error()
+  );
+}
+
+/// The two process ids a `spawn-child` or `spawn-grandchild` fixture recorded.
+pub fn process_ids_at(path: &Path) -> (u32, u32) {
+  let recorded = std::fs::read(path).expect("the fixture wrote its process ids");
+  let report: serde_json::Value = serde_json::from_slice(&recorded).expect("valid JSON");
+
+  let read = |name: &str| {
+    u32::try_from(report[name].as_u64().expect("a process id")).expect("a process id fits")
+  };
+
+  (read("child"), read("grandchild"))
 }
 
 #[cfg(unix)]

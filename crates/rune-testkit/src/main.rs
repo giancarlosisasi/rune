@@ -31,10 +31,17 @@ fn main() -> ExitCode {
     Some("report-env") => report_env(&arguments),
     Some("ready-then-wait") => ready_then_wait(rest.contains(&"--exit-on-int")),
     Some("exit-code") => exit_code(rest.first().copied()),
-    Some("trap-term") => trap_term(),
-    Some("spawn-grandchild") => spawn_grandchild(rest.first().copied()),
+    Some("trap-term") => trap_term(rest.first().copied()),
+    Some("spawn-grandchild") => spawn_grandchild(rest.first().copied(), true),
+    Some("spawn-child") => spawn_grandchild(rest.first().copied(), false),
     Some("isatty") => report_isatty(),
     Some("emit") => emit(&rest),
+    Some("chatty") => chatty(&rest, false),
+    Some("chatty-hold") => chatty(&rest, true),
+    Some("mark") => mark(&rest),
+    Some("await") => wait_for(&rest),
+    Some("after") => after(&rest),
+    Some("colorize") => colorize(&rest),
     Some("fail-once") => fail_once(rest.first().copied()),
     Some("touch") => touch(rest.first().copied()),
     other => usage(other),
@@ -95,8 +102,17 @@ fn exit_code(code: Option<&str>) -> ExitCode {
 
 /// Catches `SIGTERM`, says so, and keeps running — the fixture for escalation paths that
 /// must prove a second, stronger signal was needed.
-fn trap_term() -> ExitCode {
+///
+/// The optional marker is written once the handler is installed, so a sibling can wait
+/// for that fact rather than for a line on a stream something else is already reading.
+fn trap_term(marker: Option<&str>) -> ExitCode {
   install_term_report();
+
+  if let Some(marker) = marker
+    && let Err(error) = std::fs::write(PathBuf::from(marker), "armed\n")
+  {
+    return fail(&format!("cannot write {marker}: {error}"));
+  }
 
   if print_line(READY) == ExitCode::FAILURE {
     return ExitCode::FAILURE;
@@ -107,9 +123,14 @@ fn trap_term() -> ExitCode {
 
 /// Spawns a child of its own and records both process ids, so a test can ask what
 /// survived a teardown.
-fn spawn_grandchild(pid_file: Option<&str>) -> ExitCode {
+///
+/// `detached` decides which of the two stories the fixture tells. Detached, it steps out
+/// of the process group it was born into, which is the one way a POSIX grandchild escapes
+/// a teardown — the documented limitation. Attached, it is the ordinary case, and nothing
+/// short of a bug lets it survive.
+fn spawn_grandchild(pid_file: Option<&str>, detached: bool) -> ExitCode {
   let Some(pid_file) = pid_file else {
-    return fail("spawn-grandchild needs a path to write the process ids to");
+    return fail("spawning a grandchild needs a path to write the process ids to");
   };
 
   let Ok(own_binary) = std::env::current_exe() else {
@@ -118,7 +139,9 @@ fn spawn_grandchild(pid_file: Option<&str>) -> ExitCode {
 
   let mut command = Command::new(own_binary);
   command.arg("ready-then-wait").stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
-  detach(&mut command);
+  if detached {
+    detach(&mut command);
+  }
 
   let child = match command.spawn() {
     Ok(child) => child,
@@ -157,6 +180,115 @@ fn emit(chunks: &[&str]) -> ExitCode {
     }
   }
   ExitCode::SUCCESS
+}
+
+/// Writes `<label> <n>` for n from 1 to count, as fast as the pipe will take it.
+///
+/// The label goes on every line so a test can tell which process wrote it without relying
+/// on rune's own prefix — which is the thing under test and cannot also be the evidence.
+/// With `hold`, a marker file is created after the last line and the process then blocks,
+/// so a sibling can act while this one still has output that must not be lost.
+fn chatty(arguments: &[&str], hold: bool) -> ExitCode {
+  let (Some(label), Some(count)) = (arguments.first(), arguments.get(1)) else {
+    return fail("chatty needs a label and a number of lines");
+  };
+  let Ok(count) = count.parse::<u32>() else {
+    return fail("chatty needs a number of lines");
+  };
+
+  let mut stdout = io::stdout().lock();
+  for line in 1..=count {
+    if writeln!(stdout, "{label} {line}").is_err() {
+      return ExitCode::FAILURE;
+    }
+  }
+  if stdout.flush().is_err() {
+    return ExitCode::FAILURE;
+  }
+
+  if !hold {
+    return ExitCode::SUCCESS;
+  }
+
+  let Some(marker) = arguments.get(2) else {
+    return fail("chatty-hold needs a marker path");
+  };
+  if let Err(error) = std::fs::write(PathBuf::from(marker), "done\n") {
+    return fail(&format!("cannot write {marker}: {error}"));
+  }
+
+  block_forever()
+}
+
+/// Creates a marker naming this process, then exits with a chosen code.
+///
+/// The process id is the point. Writing the marker happens *before* exiting, so a sibling
+/// that only waited for the file could still exit first — which is exactly the order a
+/// test about exit order must not leave to chance. Recording the id lets [`after`] wait
+/// for the exit itself.
+fn mark(arguments: &[&str]) -> ExitCode {
+  let (Some(path), Some(code)) = (arguments.first(), arguments.get(1)) else {
+    return fail("mark needs a path and an exit code");
+  };
+
+  let report = serde_json::json!({ "pid": std::process::id() });
+  if let Err(error) = std::fs::write(PathBuf::from(path), report.to_string()) {
+    return fail(&format!("cannot write {path}: {error}"));
+  }
+
+  exit_code(Some(code))
+}
+
+/// Blocks until a marker exists, then exits with a chosen code.
+///
+/// For the markers whose writer goes on running: a fixture that announces itself and then
+/// holds the process open.
+fn wait_for(arguments: &[&str]) -> ExitCode {
+  let (Some(path), Some(code)) = (arguments.first(), arguments.get(1)) else {
+    return fail("await needs a path and an exit code");
+  };
+
+  let path = PathBuf::from(path);
+  while !path.exists() {
+    std::thread::yield_now();
+  }
+
+  exit_code(Some(code))
+}
+
+/// Blocks until the process that wrote a marker has gone, then exits with a chosen code.
+///
+/// This is what makes "this member exits before that one" a fact rather than a race.
+fn after(arguments: &[&str]) -> ExitCode {
+  let (Some(path), Some(code)) = (arguments.first(), arguments.get(1)) else {
+    return fail("after needs a marker path and an exit code");
+  };
+
+  let path = PathBuf::from(path);
+  loop {
+    if let Ok(recorded) = std::fs::read(&path)
+      && let Ok(report) = serde_json::from_slice::<serde_json::Value>(&recorded)
+      && let Some(pid) = report["pid"].as_u64().and_then(|pid| u32::try_from(pid).ok())
+      && !rune_exec::teardown::is_running(pid)
+    {
+      return exit_code(Some(code));
+    }
+
+    std::thread::yield_now();
+  }
+}
+
+/// Emits color only when told its output supports it, exactly as a real tool does.
+///
+/// A tool that always colors would prove nothing: what has to hold is that a piped child
+/// still learns rune's own output supports color, and acts on it.
+fn colorize(arguments: &[&str]) -> ExitCode {
+  let Some(text) = arguments.first() else {
+    return fail("colorize needs some text");
+  };
+
+  let wanted = std::env::var("FORCE_COLOR").is_ok_and(|level| level != "0");
+  if wanted { print_line(&format!("\u{1b}[31m{text}\u{1b}[0m")) } else { print_line(text) }
 }
 
 /// Fails the first time and succeeds afterwards, with the attempt recorded on disk so
@@ -199,7 +331,8 @@ fn usage(unknown: Option<&str>) -> ExitCode {
   let named = unknown.unwrap_or("<nothing>");
   fail(&format!(
     "unknown subcommand `{named}`\n\nknown: report-env, ready-then-wait, exit-code, \
-     trap-term, spawn-grandchild, isatty, emit, fail-once, touch"
+     trap-term, spawn-grandchild, spawn-child, isatty, emit, chatty, chatty-hold, mark, \
+     await, colorize, fail-once, touch"
   ))
 }
 

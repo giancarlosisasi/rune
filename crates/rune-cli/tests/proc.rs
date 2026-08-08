@@ -6,10 +6,11 @@
 
 mod harness;
 
+use std::io::BufRead as _;
 use std::process::Stdio;
 use std::time::Duration;
 
-use harness::{Test, read_ready, wait_until};
+use harness::{Test, interrupt, interruptible, process_ids_at, read_ready, wait_until};
 
 /// How long an operating system is given to finish tearing a process tree down. Generous
 /// on purpose: it bounds a failure, it does not sequence anything.
@@ -178,6 +179,127 @@ fn a_console_control_event_leaves_no_orphan() {
       "{name} outlived rune"
     );
   }
+}
+
+/// Test 5c.8 — interrupting a group ends every member's tree and leaves nothing behind.
+///
+/// A piped member sits in a process group of its own, which is what lets its tree be torn
+/// down as a unit — and also what stops the terminal's own interrupt from reaching it. So
+/// this is not the single-script path with more children: rune has to do the reaching.
+///
+/// The orphan probe is the assertion with teeth. Delivery races with the teardown, so the
+/// exit code is only ever asked to be honest about having been interrupted.
+#[test]
+fn interrupting_a_group_leaves_no_member_and_no_grandchild_behind() {
+  let test = group_of_holders();
+  let mut command = test.command(test.dir());
+  let mut child = interruptible(&mut command).spawn().expect("spawn rune");
+
+  let recorded = [test.dir().join("one.json"), test.dir().join("two.json")];
+  assert!(
+    wait_until(TEARDOWN_LIMIT, || recorded.iter().all(|path| path.exists())),
+    "the members never reported their process ids"
+  );
+  let trees: Vec<(u32, u32)> = recorded.iter().map(|path| process_ids_at(path)).collect();
+
+  interrupt(&child);
+  let status = child.wait().expect("collect rune");
+
+  assert!(status.code() != Some(0), "an interrupted group must not report success");
+
+  for (member, (direct, grandchild)) in trees.iter().enumerate() {
+    for (name, pid) in [("the member", *direct), ("its grandchild", *grandchild)] {
+      assert!(
+        wait_until(TEARDOWN_LIMIT, || !rune_exec::teardown::is_running(pid)),
+        "{name} of group member {member} outlived rune"
+      );
+    }
+  }
+}
+
+/// Test 5c.9 — after an interrupt, the next step of an ordered run never starts.
+///
+/// Re-scoped from the original row: rune has no spawn queue, because a parallel group
+/// starts every member at once. The invariant is real, and it lives where a "next" exists.
+/// The marker is the evidence — a file that was never created fails loudly, unlike "we
+/// did not observe a spawn".
+#[test]
+fn no_later_step_starts_after_an_interrupt() {
+  let test = Test::new()
+    .config(&config(&format!(
+      r#"{{
+        hold: {{ command: "{TOOL} ready-then-wait" }},
+        never: {{ command: "{TOOL} touch never.marker" }},
+        chain: {{ serial: ["hold", "never"] }}
+      }}"#
+    )))
+    .tool(&format!("node_modules/.bin/{TOOL}"))
+    .args(["run", "chain"]);
+
+  let mut command = test.command(test.dir());
+  let mut child = interruptible(&mut command).stdout(Stdio::piped()).spawn().expect("spawn rune");
+
+  read_ready(child.stdout.as_mut().expect("stdout was piped"));
+  interrupt(&child);
+  child.wait().expect("collect rune");
+
+  assert!(
+    !test.dir().join("never.marker").exists(),
+    "the step after the interrupted one ran anyway"
+  );
+}
+
+/// Test 5c.12 — the reader of rune's own output going away ends the run cleanly.
+///
+/// `SIGPIPE` is ignored by default in Rust, so this arrives as an ordinary broken-pipe
+/// write error rather than as process death. Treating it as a fault to report would put a
+/// stack trace on the screen of anyone who typed `| head`.
+#[test]
+fn a_closed_output_ends_the_run_without_a_panic() {
+  let test = fixture_group(&format!(
+    r#"{{
+      one: {{ command: "{TOOL} chatty ONE 100000" }},
+      two: {{ command: "{TOOL} chatty TWO 100000" }},
+      both: {{ parallel: ["one", "two"] }}
+    }}"#
+  ))
+  .args(["run", "both"]);
+
+  let mut command = test.command(test.dir());
+  let mut child = command
+    .stdin(Stdio::null())
+    .stdout(Stdio::piped())
+    .stderr(Stdio::piped())
+    .spawn()
+    .expect("spawn rune");
+
+  // One line read, then the reader goes away — which is all `| head -1` is.
+  let mut first = String::new();
+  std::io::BufReader::new(child.stdout.as_mut().expect("stdout was piped"))
+    .read_line(&mut first)
+    .expect("read one line");
+  drop(child.stdout.take());
+
+  let output = child.wait_with_output().expect("collect rune");
+  let complaints = String::from_utf8_lossy(&output.stderr);
+
+  assert!(!complaints.contains("panicked"), "rune panicked on a closed output: {complaints}");
+}
+
+/// Two members, each holding a grandchild, so an interrupt has four trees to reach.
+fn group_of_holders() -> Test {
+  fixture_group(&format!(
+    r#"{{
+      one: {{ command: "{TOOL} spawn-child one.json" }},
+      two: {{ command: "{TOOL} spawn-child two.json" }},
+      both: {{ parallel: ["one", "two"] }}
+    }}"#
+  ))
+  .args(["run", "both"])
+}
+
+fn fixture_group(scripts: &str) -> Test {
+  Test::new().config(&config(scripts)).tool(&format!("node_modules/.bin/{TOOL}"))
 }
 
 /// Sends `SIGINT` to rune's whole process group, the way a terminal does, and returns what

@@ -4,26 +4,50 @@
 //! rewrites the child's answer — a script that handles the interrupt and exits 0 makes
 //! rune exit 0, which is what `npm run` does and what years of muscle memory expect.
 //!
-//! Two disciplines hold the layer together:
+//! Three disciplines hold the layer together:
 //!
 //! - The registry is locked across the spawn, so a signal cannot arrive in the gap
 //!   between the child existing and rune knowing about it and leave a process behind.
 //! - The POSIX handler does one async-signal-safe thing: write a byte down a self-pipe.
 //!   Everything else happens on an ordinary thread reading the other end.
+//! - A running group learns about the signal by waiting on [`interrupts`] rather than by
+//!   having work done for it inside the handler. Tearing several process trees down is
+//!   not something to attempt from a signal context, and a group already has a place
+//!   that owns its children.
 
 use std::io;
-use std::process::{Child, Command};
-use std::sync::{Mutex, MutexGuard, Once, PoisonError};
+use std::sync::{LazyLock, Mutex, MutexGuard, Once, PoisonError};
+
+use tokio::process::{Child, Command};
+use tokio::sync::watch;
 
 /// What rune knows about the run in progress.
 #[derive(Debug, Default)]
 struct Registry {
-  child: Option<u32>,
+  /// Every child rune spawned and has not yet collected. A group has several at once.
+  children: Vec<u32>,
   caught: Option<i32>,
 }
 
-static REGISTRY: Mutex<Registry> = Mutex::new(Registry { child: None, caught: None });
+static REGISTRY: Mutex<Registry> = Mutex::new(Registry { children: Vec::new(), caught: None });
 static INSTALLED: Once = Once::new();
+
+/// Carries the first signal to whoever is waiting on one.
+///
+/// A watch rather than a notification: it holds the value, so a group that subscribes
+/// after the signal already arrived still sees it. An edge would simply be missed.
+static INTERRUPT: LazyLock<watch::Sender<Option<i32>>> = LazyLock::new(|| watch::channel(None).0);
+
+/// Installs the handlers before anything that depends on them starts.
+pub fn arm() {
+  INSTALLED.call_once(install);
+}
+
+/// A view of the signal that arrived, for a caller that has to react to one.
+pub fn interrupts() -> watch::Receiver<Option<i32>> {
+  arm();
+  INTERRUPT.subscribe()
+}
 
 /// Spawns with the registry locked, and binds the platform teardown handle to the child
 /// before anything else can observe it.
@@ -31,7 +55,7 @@ pub fn spawn<T>(
   command: &mut Command,
   attach: impl FnOnce(&Child) -> io::Result<T>,
 ) -> io::Result<(Child, T)> {
-  INSTALLED.call_once(install);
+  arm();
 
   let mut registry = registry();
   let mut child = command.spawn()?;
@@ -40,22 +64,24 @@ pub fn spawn<T>(
     Ok(attached) => attached,
     Err(error) => {
       // A child rune cannot supervise is worse than no child at all.
-      let _ = child.kill();
-      let _ = child.wait();
+      let _ = child.start_kill();
       return Err(error);
     }
   };
 
-  registry.child = Some(child.id());
+  if let Some(pid) = child.id() {
+    registry.children.push(pid);
+  }
+
   Ok((child, attached))
 }
 
-/// Drops the child registration once its status is known.
-pub fn forget() {
-  registry().child = None;
+/// Drops one child's registration once its status is known.
+pub fn forget(pid: u32) {
+  registry().children.retain(|registered| *registered != pid);
 }
 
-/// The signal that arrived while the child ran, if one did.
+/// The signal that arrived while the children ran, if one did.
 pub fn caught() -> Option<i32> {
   registry().caught
 }
@@ -67,16 +93,29 @@ fn registry() -> MutexGuard<'static, Registry> {
 
 /// Records the signal, and forwards it when the operating system did not already.
 fn record(signal: i32, forward: bool) {
-  let mut registry = registry();
-  registry.caught.get_or_insert(signal);
+  let children = {
+    let mut registry = registry();
+    registry.caught.get_or_insert(signal);
 
-  if !forward {
-    return;
-  }
+    if forward { registry.children.clone() } else { Vec::new() }
+  };
 
-  if let Some(pid) = registry.child {
+  // Outside the lock: forwarding touches the operating system, and a group waking up on
+  // the announcement below will want the registry for itself.
+  for pid in children {
     let _ = platform::forward(pid, signal);
   }
+
+  // The first signal is the one reported, matching `caught`. A second Ctrl+C while a
+  // teardown is already running must not rewrite what the run is answering for.
+  INTERRUPT.send_if_modified(|held| {
+    if held.is_some() {
+      return false;
+    }
+
+    *held = Some(signal);
+    true
+  });
 }
 
 #[cfg(unix)]

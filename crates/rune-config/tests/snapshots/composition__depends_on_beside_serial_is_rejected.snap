@@ -7,6 +7,5 @@ expression: error
 
 script `ci` sets `dependsOn` beside `serial`
 
-a group already says what runs and in which order — its member list. A second ordering
-on the same entry would have no unambiguous meaning. Put the prerequisite first in
-the member list instead.
+a group runs the scripts it names and nothing before them. To run something first, make
+it the first member of a `serial` group with this one after it.

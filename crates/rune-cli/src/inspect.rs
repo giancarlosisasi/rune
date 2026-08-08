@@ -16,7 +16,7 @@ use rune_config::env::PLATFORM;
 use rune_config::inherit::{Link, Resolved, Runs, Scope};
 use rune_config::load::Loaded;
 use rune_config::paths::relative_to;
-use rune_config::schema::Command;
+use rune_config::schema::{Command, SuccessPolicy};
 use rune_exec::environment::{self, Descriptor, Layering};
 use rune_exec::quote::command_line;
 use rune_exec::shell::{SHELL_VARIABLE, Shell};
@@ -51,6 +51,13 @@ fn render(name: &str, resolved: &Resolved<'_>, loaded: &Loaded) -> String {
       let _ = writeln!(report, "{:<LABEL$}  {}", "runs", members.join(" → "));
       if continue_on_error {
         let _ = writeln!(report, "{:<LABEL$}  keeps going, then reports the first", "on failure");
+      }
+    }
+    Runs::Parallel { members, continue_on_error, policy } => {
+      let _ = writeln!(report, "{:<LABEL$}  {}", "all at once", members.join(", "));
+      let _ = writeln!(report, "{:<LABEL$}  {}", "succeeds if", succeeds_if(policy));
+      if continue_on_error {
+        let _ = writeln!(report, "{:<LABEL$}  lets the others finish, then reports", "on failure");
       }
     }
   }
@@ -107,6 +114,17 @@ fn contribution(link: &Link<'_>, resolved: &Resolved<'_>) -> String {
   match resolved.runs {
     Runs::Command(command) => format!("runs `{}`", command.select(PLATFORM)),
     Runs::Serial { members, .. } => format!("runs {}", members.join(", ")),
+    Runs::Parallel { members, .. } => format!("runs {} at once", members.join(", ")),
+  }
+}
+
+/// What the success policy means, said rather than named. `first` is the value a user
+/// writes; "the member that finishes first" is what they need to know it does.
+fn succeeds_if(policy: SuccessPolicy) -> &'static str {
+  match policy {
+    SuccessPolicy::All => "every member succeeds",
+    SuccessPolicy::First => "the member that finishes first succeeds",
+    SuccessPolicy::Last => "the member that finishes last succeeds",
   }
 }
 

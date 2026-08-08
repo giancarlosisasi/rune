@@ -12,6 +12,8 @@ workspace = true
 [dependencies]
 anstyle = { workspace = true }
 supports-color = { workspace = true }
+tokio = { workspace = true }
 
 [dev-dependencies]
 insta = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt"] }

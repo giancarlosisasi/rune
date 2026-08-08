@@ -15,6 +15,7 @@ use std::collections::BTreeSet;
 use thiserror::Error;
 
 use crate::inherit::{self, InheritError, Layer, Resolved, Runs, Scope};
+use crate::schema::SuccessPolicy;
 use crate::suggest::{closest, did_you_mean};
 
 #[derive(Debug, Error)]
@@ -41,7 +42,7 @@ pub enum ComposeError {
   Cycle { path: String },
 }
 
-/// An ordered run, flattened from however many groups and prerequisites produced it.
+/// A run, flattened from however many groups and prerequisites produced it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Plan {
   /// Runs this script's own command. Its prerequisites, when it has any, are steps of
@@ -54,6 +55,25 @@ pub enum Plan {
     /// exit code.
     continue_on_error: bool,
   },
+  /// Starts every member at once and waits for all of them.
+  Parallel {
+    members: Vec<Member>,
+    /// Lets a failing member's siblings run to their own completion. The group still
+    /// ends non-zero.
+    continue_on_error: bool,
+    policy: SuccessPolicy,
+  },
+}
+
+/// One member of a parallel group.
+///
+/// The name travels with the plan because it is what the member's output is labelled
+/// with. A nested group has no name of its own, so without this the label would have to
+/// be invented at the moment it was needed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Member {
+  pub name: String,
+  pub plan: Plan,
 }
 
 /// What running `name` would do, or `None` when no config in scope defines it.
@@ -147,13 +167,24 @@ fn assemble(
       Ok(Plan::Serial { steps, continue_on_error: false })
     }
     Runs::Serial { members, continue_on_error } => {
-      // A group carries no prerequisites of its own — the schema refuses them, because
-      // its member list already is the order.
+      // A group carries no prerequisites of its own — the schema refuses them, because a
+      // group runs the scripts it names and nothing before them.
       for member in members {
         steps.push(step(layers, scope, name, Edge::Member, member, path)?);
       }
 
       Ok(Plan::Serial { steps, continue_on_error })
+    }
+    Runs::Parallel { members, continue_on_error, policy } => {
+      let members = members
+        .iter()
+        .map(|member| {
+          let plan = step(layers, scope, name, Edge::Member, member, path)?;
+          Ok(Member { name: member.clone(), plan })
+        })
+        .collect::<Result<Vec<_>, ComposeError>>()?;
+
+      Ok(Plan::Parallel { members, continue_on_error, policy })
     }
   }
 }

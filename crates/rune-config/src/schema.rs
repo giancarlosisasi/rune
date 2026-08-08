@@ -12,7 +12,10 @@ use serde::Deserialize;
 use thiserror::Error;
 
 /// The keys that decide which kind of script an entry is. Each later change adds one.
-const DISCRIMINANTS: &[&str] = &["command", "extends", "serial"];
+const DISCRIMINANTS: &[&str] = &["command", "extends", "serial", "parallel"];
+
+/// The discriminants that name other scripts rather than running a command.
+const GROUPS: &[&str] = &["serial", "parallel"];
 
 /// Fields any script may carry, whatever its discriminant.
 const COMMON_FIELDS: &[&str] = &["description", "cwd", "env", "envFile"];
@@ -25,6 +28,12 @@ const DEPENDS_ON: &str = "dependsOn";
 
 /// Makes a group run every member instead of stopping at the first failure.
 const CONTINUE_ON_ERROR: &str = "continueOnError";
+
+/// Which member of a parallel group the group takes its result from.
+const SUCCESS_POLICY: &str = "successPolicy";
+
+/// Keeps one script on rune's own terminal while its siblings are piped.
+const INTERACTIVE: &str = "interactive";
 
 /// The keys a per-OS `command` object may hold. The names are Node's `process.platform`
 /// values, so a config reading `rune.platform` and a config using this object spell the
@@ -96,12 +105,11 @@ pub enum SchemaError {
   },
 
   #[error(
-    "script `{script}` sets `{DEPENDS_ON}` beside `serial`\n\n\
-     a group already says what runs and in which order — its member list. A second \
-     ordering\non the same entry would have no unambiguous meaning. Put the prerequisite \
-     first in\nthe member list instead."
+    "script `{script}` sets `{DEPENDS_ON}` beside `{group}`\n\n\
+     a group runs the scripts it names and nothing before them. To run something first, \
+     make\nit the first member of a `serial` group with this one after it."
   )]
-  DependsOnGroup { script: String },
+  DependsOnGroup { script: String, group: String },
 
   #[error(
     "script `{script}` has a `{CONTINUE_ON_ERROR}` that is {found}\n\n\
@@ -109,6 +117,36 @@ pub enum SchemaError {
      and\nthe group still ends with the first failure's exit code."
   )]
   ContinueOnErrorShape { script: String, found: String },
+
+  #[error(
+    "script `{script}` has a `{SUCCESS_POLICY}` of `{found}`\n\n\
+     `{SUCCESS_POLICY}` is one of: {}",
+    list(SuccessPolicy::PERMITTED)
+  )]
+  SuccessPolicyValue { script: String, found: String },
+
+  #[error(
+    "script `{script}` sets `{SUCCESS_POLICY}` on a `serial` group\n\n\
+     `{SUCCESS_POLICY}` picks between members by the time they exited, and a serial group \
+     runs\nthem one at a time — first and last are already its member list. The option \
+     applies\nto `parallel` groups."
+  )]
+  SuccessPolicyOnSerial { script: String },
+
+  #[error(
+    "script `{script}` sets `{INTERACTIVE}` on a `{group}` group\n\n\
+     `{INTERACTIVE}` describes one process's relationship with the terminal. A group is \
+     not a\nprocess, and only one member of a group can own the terminal. Put it on the \
+     member\nthat needs it."
+  )]
+  InteractiveOnGroup { script: String, group: String },
+
+  #[error(
+    "script `{script}` has an `{INTERACTIVE}` that is {found}\n\n\
+     `{INTERACTIVE}` is true or false. Set, the script keeps rune's own terminal even \
+     while\nits siblings are piped and prefixed."
+  )]
+  InteractiveShape { script: String, found: String },
 
   #[error("script `{script}`: {source}")]
   Invalid { script: String, source: serde_json::Error },
@@ -127,6 +165,12 @@ const APPEND_ARGS_LIST: (&str, &str) = (
 const SERIAL_LIST: (&str, &str) = (
   "`serial` is a list of script names, run one at a time in the order written:\n\n  \
    serial: [\"lint\", \"typecheck\", \"test\"]",
+  "every element is the name of another script, written as a string",
+);
+
+const PARALLEL_LIST: (&str, &str) = (
+  "`parallel` is a list of script names, all started at once:\n\n  \
+   parallel: [\"dev:server\", \"dev:watch\"]",
   "every element is the name of another script, written as a string",
 );
 
@@ -150,6 +194,7 @@ fn meaning(discriminant: &str) -> &'static str {
     "command" => "runs a command of its own",
     "extends" => "builds on another script and adds to it",
     "serial" => "runs other scripts, one after another",
+    "parallel" => "runs other scripts, all at the same time",
     other => unreachable!("`{other}` is listed as a discriminant but has no meaning"),
   }
 }
@@ -177,8 +222,12 @@ pub struct Script {
   ///
   /// `None` means the entry said nothing, so an extending script inherits what it builds
   /// on; an empty list means it said "nothing runs first" and that wins. A group never
-  /// carries one — its member list is already the order.
+  /// carries one — it runs the scripts it names and nothing before them.
   pub depends_on: Option<Vec<String>>,
+  /// Keeps this script on rune's own terminal even as a member of a group.
+  ///
+  /// `None` means the entry said nothing, so an extending script inherits the answer.
+  pub interactive: Option<bool>,
   pub kind: Kind,
 }
 
@@ -190,6 +239,37 @@ pub enum Kind {
   Extends { target: String, append_args: Vec<String> },
   /// Runs other scripts, one at a time, in the order written.
   Serial { members: Vec<String>, continue_on_error: bool },
+  /// Runs other scripts all at once, and waits for every one of them.
+  Parallel { members: Vec<String>, continue_on_error: bool, policy: SuccessPolicy },
+}
+
+/// Which member of a parallel group the group takes its result from.
+///
+/// `First` and `Last` are settled by exit time, never by position in the member list: a
+/// member's place in a list says nothing about when it finishes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SuccessPolicy {
+  /// The group succeeds only if every member succeeded.
+  #[default]
+  All,
+  /// The group takes the result of the member that exited first in time.
+  First,
+  /// The group takes the result of the member that exited last in time.
+  Last,
+}
+
+impl SuccessPolicy {
+  /// The values a config may write, in the order the error message lists them.
+  pub const PERMITTED: &'static [&'static str] = &["all", "first", "last"];
+
+  fn parse(value: &str) -> Option<Self> {
+    match value {
+      "all" => Some(Self::All),
+      "first" => Some(Self::First),
+      "last" => Some(Self::Last),
+      _ => None,
+    }
+  }
 }
 
 /// What a script runs: one command everywhere, or one per operating system.
@@ -287,8 +367,26 @@ fn parse_script(name: &str, entry: &serde_json::Value) -> Result<Script, SchemaE
     return Err(SchemaError::AppendArgsWithoutExtends { script: name.to_owned() });
   }
 
-  if object.contains_key(DEPENDS_ON) && object.contains_key("serial") {
-    return Err(SchemaError::DependsOnGroup { script: name.to_owned() });
+  // Checked ahead of the arms so the message is about the option a user reached for
+  // rather than about a field the arm they landed in happens not to know.
+  if let Some(group) = found.filter(|key| GROUPS.contains(key)) {
+    if object.contains_key(DEPENDS_ON) {
+      return Err(SchemaError::DependsOnGroup {
+        script: name.to_owned(),
+        group: (*group).to_owned(),
+      });
+    }
+
+    if object.contains_key(INTERACTIVE) {
+      return Err(SchemaError::InteractiveOnGroup {
+        script: name.to_owned(),
+        group: (*group).to_owned(),
+      });
+    }
+  }
+
+  if found == Some(&"serial") && object.contains_key(SUCCESS_POLICY) {
+    return Err(SchemaError::SuccessPolicyOnSerial { script: name.to_owned() });
   }
 
   let Some(discriminant) = found else {
@@ -306,16 +404,35 @@ fn parse_script(name: &str, entry: &serde_json::Value) -> Result<Script, SchemaE
     "command" => {
       // Checked before deserializing so the message can name the script. serde's own
       // unknown-field error knows the field but not which entry it came from.
-      reject_unknown_fields(name, object, &allowed_with(&["command", DEPENDS_ON]))?;
+      reject_unknown_fields(name, object, &allowed_with(&["command", DEPENDS_ON, INTERACTIVE]))?;
       Kind::Command(parse_command(name, &object["command"])?)
     }
     "extends" => {
-      reject_unknown_fields(name, object, &allowed_with(&["extends", APPEND_ARGS, DEPENDS_ON]))?;
+      reject_unknown_fields(
+        name,
+        object,
+        &allowed_with(&["extends", APPEND_ARGS, DEPENDS_ON, INTERACTIVE]),
+      )?;
       parse_extends(name, object)?
     }
     "serial" => {
       reject_unknown_fields(name, object, &allowed_with(&["serial", CONTINUE_ON_ERROR]))?;
-      parse_serial(name, object)?
+      Kind::Serial {
+        members: string_list(name, "serial", &object["serial"], SERIAL_LIST)?,
+        continue_on_error: parse_continue_on_error(name, object)?,
+      }
+    }
+    "parallel" => {
+      reject_unknown_fields(
+        name,
+        object,
+        &allowed_with(&["parallel", CONTINUE_ON_ERROR, SUCCESS_POLICY]),
+      )?;
+      Kind::Parallel {
+        members: string_list(name, "parallel", &object["parallel"], PARALLEL_LIST)?,
+        continue_on_error: parse_continue_on_error(name, object)?,
+        policy: parse_success_policy(name, object)?,
+      }
     }
     other => unreachable!("`{other}` is listed as a discriminant but has no arm"),
   };
@@ -323,6 +440,14 @@ fn parse_script(name: &str, entry: &serde_json::Value) -> Result<Script, SchemaE
   let depends_on = match object.get(DEPENDS_ON) {
     None => None,
     Some(value) => Some(string_list(name, DEPENDS_ON, value, DEPENDS_ON_LIST)?),
+  };
+
+  let interactive = match object.get(INTERACTIVE) {
+    None => None,
+    Some(value) => Some(value.as_bool().ok_or_else(|| SchemaError::InteractiveShape {
+      script: name.to_owned(),
+      found: describe(value),
+    })?),
   };
 
   let common: Common = serde_json::from_value(entry.clone())
@@ -334,25 +459,37 @@ fn parse_script(name: &str, entry: &serde_json::Value) -> Result<Script, SchemaE
     env: common.env,
     env_file: common.env_file,
     depends_on,
+    interactive,
     kind,
   })
 }
 
-fn parse_serial(
+fn parse_continue_on_error(
   script: &str,
   object: &serde_json::Map<String, serde_json::Value>,
-) -> Result<Kind, SchemaError> {
-  let members = string_list(script, "serial", &object["serial"], SERIAL_LIST)?;
-
-  let continue_on_error = match object.get(CONTINUE_ON_ERROR) {
-    None => false,
-    Some(value) => value.as_bool().ok_or_else(|| SchemaError::ContinueOnErrorShape {
-      script: script.to_owned(),
-      found: describe(value),
-    })?,
+) -> Result<bool, SchemaError> {
+  let Some(value) = object.get(CONTINUE_ON_ERROR) else {
+    return Ok(false);
   };
 
-  Ok(Kind::Serial { members, continue_on_error })
+  value.as_bool().ok_or_else(|| SchemaError::ContinueOnErrorShape {
+    script: script.to_owned(),
+    found: describe(value),
+  })
+}
+
+fn parse_success_policy(
+  script: &str,
+  object: &serde_json::Map<String, serde_json::Value>,
+) -> Result<SuccessPolicy, SchemaError> {
+  let Some(value) = object.get(SUCCESS_POLICY) else {
+    return Ok(SuccessPolicy::default());
+  };
+
+  value.as_str().and_then(SuccessPolicy::parse).ok_or_else(|| SchemaError::SuccessPolicyValue {
+    script: script.to_owned(),
+    found: value.as_str().map_or_else(|| describe(value), str::to_owned),
+  })
 }
 
 /// A list of strings, or the reason `value` is not one.
@@ -484,7 +621,7 @@ fn describe(value: &serde_json::Value) -> String {
 mod tests {
   use serde_json::json;
 
-  use super::{Kind, PerOsCommand, parse};
+  use super::{Kind, PerOsCommand, SuccessPolicy, parse};
 
   /// The command of a script that has one, for the tests that only care about that.
   fn command_of(config: &super::Config, name: &str, platform: &str) -> String {
@@ -791,6 +928,125 @@ mod tests {
       .to_string();
 
     assert!(error.contains("`dependsOn`"), "{error}");
+  }
+
+  /// The `parallel` half of the dispatch, with all three of its fields.
+  #[test]
+  fn a_parallel_group_parses_with_its_options() {
+    let config = parse(&json!({
+      "scripts": {
+        "dev": { "parallel": ["server", "watch"], "continueOnError": true, "successPolicy": "first" },
+      }
+    }))
+    .expect("parses");
+
+    let Kind::Parallel { members, continue_on_error, policy } = &config.scripts["dev"].kind else {
+      panic!("`dev` did not parse as a parallel group");
+    };
+    assert_eq!(members, &["server".to_owned(), "watch".to_owned()]);
+    assert!(*continue_on_error);
+    assert_eq!(*policy, SuccessPolicy::First);
+  }
+
+  /// Requiring every member to succeed is the default, so a group that says nothing about
+  /// it must not quietly take one member's answer for the whole group.
+  #[test]
+  fn a_parallel_group_requires_every_member_unless_it_says_otherwise() {
+    let config = parse(&json!({ "scripts": { "dev": { "parallel": ["a"] } } })).expect("parses");
+
+    let Kind::Parallel { policy, continue_on_error, .. } = &config.scripts["dev"].kind else {
+      panic!("`dev` did not parse as a parallel group");
+    };
+    assert_eq!(*policy, SuccessPolicy::All);
+    assert!(!*continue_on_error);
+  }
+
+  /// The value a user wrote and the values they could have written, both named. A message
+  /// listing neither leaves them guessing at a closed set.
+  #[test]
+  fn a_success_policy_outside_the_permitted_set_names_the_script_and_the_choices() {
+    let error =
+      parse(&json!({ "scripts": { "dev": { "parallel": ["a"], "successPolicy": "any" } } }))
+        .unwrap_err()
+        .to_string();
+
+    assert!(error.contains("`dev`"), "{error}");
+    assert!(error.contains("`any`"), "{error}");
+    for permitted in SuccessPolicy::PERMITTED {
+      assert!(error.contains(permitted), "{error}");
+    }
+  }
+
+  /// A serial group runs its members one at a time, so first and last are already its
+  /// member list. The option is refused where it would mean nothing, and the message says
+  /// where it does belong.
+  #[test]
+  fn a_success_policy_on_a_serial_group_is_rejected() {
+    let error =
+      parse(&json!({ "scripts": { "ci": { "serial": ["a"], "successPolicy": "first" } } }))
+        .unwrap_err()
+        .to_string();
+
+    assert!(error.contains("`ci`"), "{error}");
+    assert!(error.contains("successPolicy"), "{error}");
+    assert!(error.contains("parallel"), "{error}");
+  }
+
+  #[test]
+  fn a_parallel_that_is_not_a_list_of_names_is_rejected() {
+    let error =
+      parse(&json!({ "scripts": { "dev": { "parallel": "server" } } })).unwrap_err().to_string();
+    assert!(error.contains("`dev`"), "{error}");
+    assert!(error.contains("`parallel`"), "{error}");
+  }
+
+  #[test]
+  fn a_parallel_group_that_also_declares_a_command_is_rejected() {
+    let error = parse(&json!({ "scripts": { "dev": { "parallel": ["a"], "command": "vite" } } }))
+      .unwrap_err()
+      .to_string();
+
+    assert!(error.contains("`command`"), "{error}");
+    assert!(error.contains("`parallel`"), "{error}");
+  }
+
+  /// `interactive` describes one process's relationship with the terminal, which is
+  /// exactly what a command script is.
+  #[test]
+  fn interactive_parses_on_a_command_script() {
+    let config =
+      parse(&json!({ "scripts": { "dev": { "command": "vite", "interactive": true } } }))
+        .expect("parses");
+
+    assert_eq!(config.scripts["dev"].interactive, Some(true));
+  }
+
+  /// A group is not a process, and only one member of a group can own the terminal. Both
+  /// kinds of group refuse it, and the message says where it belongs.
+  #[test]
+  fn interactive_on_a_group_is_rejected_and_says_where_it_belongs() {
+    for group in ["serial", "parallel"] {
+      let error = parse(&json!({
+        "scripts": { "dev": { group: ["a"], "interactive": true } }
+      }))
+      .unwrap_err()
+      .to_string();
+
+      assert!(error.contains("`dev`"), "{group}: {error}");
+      assert!(error.contains("interactive"), "{group}: {error}");
+      assert!(error.contains("member"), "{group}: {error}");
+    }
+  }
+
+  #[test]
+  fn an_interactive_that_is_not_a_boolean_is_rejected() {
+    let error =
+      parse(&json!({ "scripts": { "dev": { "command": "vite", "interactive": "yes" } } }))
+        .unwrap_err()
+        .to_string();
+
+    assert!(error.contains("`dev`"), "{error}");
+    assert!(error.contains("interactive"), "{error}");
   }
 
   #[test]

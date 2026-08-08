@@ -17,6 +17,9 @@ path = "src/main.rs"
 workspace = true
 
 [dependencies]
+# For one question only: has a process id gone? Asking rune's own primitive keeps the
+# fixture and the code under test agreeing about what "already exited" means.
+rune-exec = { path = "../rune-exec" }
 serde_json = { workspace = true }
 
 [target.'cfg(unix)'.dependencies]

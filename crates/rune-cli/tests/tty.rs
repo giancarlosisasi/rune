@@ -90,6 +90,72 @@ fn a_child_inside_a_serial_chain_still_sees_a_terminal() {
   }
 }
 
+/// Test 5c.10, first half — an interactive member keeps the terminal while its sibling
+/// stays piped and prefixed.
+///
+/// This is the exemption stated in design D5, and the group is where it earns its keep: a
+/// watch interface inside a `dev` group is the case the whole feature exists to serve.
+#[test]
+fn an_interactive_member_keeps_the_terminal_while_its_sibling_stays_prefixed() {
+  let test = Test::new()
+    .config(&format!(
+      "export default {{ scripts: {{ \
+       watch: {{ command: \"{TOOL} isatty\", interactive: true }}, \
+       noisy: {{ command: \"{TOOL} chatty SIBLING 2\" }}, \
+       probe: {{ parallel: [\"watch\", \"noisy\"] }} \
+       }} }};\n"
+    ))
+    .tool(&format!("node_modules/.bin/{TOOL}"));
+
+  let mut session = Session::start(&test);
+  // Both members end on their own, so the run is waited out rather than watched. Polling
+  // a transcript for one member's line while the other is still writing asserts on a race
+  // rather than on the behavior.
+  let status = session.wait();
+  session.await_text("[noisy] SIBLING 2");
+  let transcript = session.transcript();
+
+  assert!(status.success(), "rune exited {status:?}\n{transcript}");
+
+  let report = report_in(&transcript);
+  for stream in ["stdin", "stdout", "stderr"] {
+    assert_eq!(report[stream], true, "{stream} was not a terminal\n{transcript}");
+  }
+
+  assert!(
+    !transcript.contains("[watch]"),
+    "the interactive member's output went through the writer\n{transcript}"
+  );
+}
+
+/// Test 5c.10, second half, and the reason the exemption exists at all.
+///
+/// A process outside the terminal's foreground group is stopped by `SIGTTIN` the moment it
+/// reads the terminal. Piped members are placed in groups of their own so their trees can
+/// be torn down, so an interactive member has to be left out of that — or every watch mode
+/// in a group freezes. The child answering at all is the assertion.
+#[test]
+#[cfg(unix)]
+fn an_interactive_member_reading_the_terminal_keeps_running() {
+  let test = Test::new()
+    .config(&format!(
+      "export default {{ scripts: {{ \
+       watch: {{ command: \"exec {TOOL} ready-then-wait\", interactive: true }}, \
+       noisy: {{ command: \"{TOOL} chatty SIBLING 2\" }}, \
+       probe: {{ parallel: [\"watch\", \"noisy\"] }} \
+       }} }};\n"
+    ))
+    .tool(&format!("node_modules/.bin/{TOOL}"));
+
+  let mut session = Session::start(&test);
+  session.await_text(READY);
+  session.send("hello\n");
+  session.await_text("GOT hello");
+
+  let status = session.wait();
+  assert!(status.success(), "rune exited {status:?}\n{}", session.transcript());
+}
+
 /// Test 3.18 — the row that would have caught the original design.
 ///
 /// A process outside the terminal's foreground group is stopped by `SIGTTIN` the moment
