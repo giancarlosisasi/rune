@@ -10,3 +10,8 @@ repository.workspace = true
 workspace = true
 
 [dependencies]
+anstyle = { workspace = true }
+supports-color = { workspace = true }
+
+[dev-dependencies]
+insta = { workspace = true }

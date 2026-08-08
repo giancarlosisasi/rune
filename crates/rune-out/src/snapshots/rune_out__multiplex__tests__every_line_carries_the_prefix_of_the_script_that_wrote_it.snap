@@ -1,0 +1,10 @@
+---
+source: crates/rune-out/src/multiplex.rs
+description: "two scripts, whole lines, both streams"
+expression: output
+---
+[lint] checking
+[test] 1 passed
+[test] 2 passed
+[lint] clean
+[test] one warning

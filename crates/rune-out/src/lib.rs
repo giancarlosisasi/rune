@@ -8,6 +8,15 @@
 //!
 //! A broken pipe is not an error worth reporting: `rune list | head` closes the pipe on
 //! purpose, and a panic there would be rune's bug, not the user's.
+//!
+//! When several scripts run at once their output has to stay attributable, and that is
+//! what [`multiplex`] is: a pure function from a sequence of chunks to the exact bytes a
+//! terminal should receive. [`channel`] is the queue feeding it, and [`color`] decides how
+//! much color rune may use and what it tells a child about color.
+
+pub mod channel;
+pub mod color;
+pub mod multiplex;
 
 use std::io::{self, Write};
 

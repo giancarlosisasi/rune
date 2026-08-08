@@ -30,6 +30,12 @@ dotenvy = "0.15"
 blake3 = "1"
 dunce = "1"
 strsim = "0.11"
+# Style codes as values rather than as strings written by hand. No I/O and no globals,
+# which is what lets the color level be an argument the tests control.
+anstyle = "1"
+# A port of node's `supports-color`, so the level rune detects is spelled the same way as
+# the `FORCE_COLOR` value a JavaScript tool reads.
+supports-color = "3"
 
 # Platform primitives for process control. `nix` covers setpgid/killpg and sigaction;
 # `windows-sys` covers Job Objects and console control events.
