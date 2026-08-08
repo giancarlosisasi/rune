@@ -20,6 +20,25 @@ Check the binary:
 pnpm rune --version
 ```
 
+### Supported platforms
+
+<!-- platforms:start -->
+
+| System | Architecture | Package | Binary |
+| --- | --- | --- | --- |
+| Windows | x64 | `@giancarlosio/rune-win32-x64` | native |
+| Windows | arm64 | `@giancarlosio/rune-win32-arm64` | ships the x64 binary, run under emulation |
+| macOS | x64 | `@giancarlosio/rune-darwin-x64` | native |
+| macOS | arm64 | `@giancarlosio/rune-darwin-arm64` | native |
+| Linux | x64 | `@giancarlosio/rune-linux-x64` | native |
+| Linux | arm64 | `@giancarlosio/rune-linux-arm64` | native |
+
+<!-- platforms:end -->
+
+The Linux binaries are statically linked, so one build per architecture runs on Alpine, Debian and
+everything between. Every release is checked in both a musl container and a GNU C library
+container before it is published.
+
 ## The first config
 
 `rune init` writes a starter config next to the nearest `package.json`. Put it at the repository
@@ -57,6 +76,39 @@ export default defineConfig({
 `defineConfig` is an identity function that supplies the types. A script declares exactly one of
 `command`, `extends`, `serial` or `parallel`.
 
+## What config code can do
+
+The config is real TypeScript, evaluated before any script runs. Types are stripped and the file
+is run in an embedded JavaScript engine, so a command can be computed instead of written out.
+
+```ts
+const port = process.env.CI ? 4000 : 3000;   // ✗ there is no `process`
+const port = rune.isCI ? 4000 : 3000;        // ✓
+```
+
+| Available | What it is |
+| --- | --- |
+| `rune.platform` | `'win32'`, `'darwin'` or `'linux'` |
+| `rune.env` | The environment rune was invoked with, read-only |
+| `rune.isCI` | Whether `CI` is set |
+| Relative imports | `./scripts/helpers.ts` and anything it imports, TypeScript included |
+
+Bare imports of npm packages do not resolve: the engine is not Node, and a config that needed
+`node_modules` would make loading a config as slow as the scripts it describes. Everything a
+config needs goes in a file beside it.
+
+Where a command genuinely differs per system, say so instead of branching:
+
+```ts
+'open:coverage': {
+  command: {
+    default: 'xdg-open coverage/index.html',
+    win32: 'start coverage/index.html',
+    darwin: 'open coverage/index.html',
+  },
+},
+```
+
 ## Run
 
 ```bash
@@ -77,6 +129,31 @@ to stderr, so stdout belongs to the script.
 | `rune init` | Write a starter config, optionally seeded from `package.json` |
 | `rune cache clear` | Remove every cached config result |
 
+## Using rune with Turbo or Nx
+
+Rune is a script registry and a runner. It is not a task graph: no caching, no topological
+ordering, no remote execution. Turbo and Nx sit on top of it and keep doing that part.
+
+**Add `rune.config.ts` to your task runner's declared inputs.** Rune's whole point is that the
+script strings in `package.json` stop changing, and those strings are part of what Turbo and Nx
+hash to decide whether a task can be replayed from cache. A change that only exists in the rune
+config is invisible to them: the cache key does not move, and the task is served from cache with
+the old command's result. Nothing reports an error.
+
+```json
+// turbo.json
+{
+  "tasks": {
+    "build": {
+      "inputs": ["$TURBO_DEFAULT$", "../../rune.config.ts", "../../scripts/**"]
+    }
+  }
+}
+```
+
+Include every file the config imports, not only the config itself. For Nx, the equivalent is
+`namedInputs` / `inputs` on the target.
+
 ## Working on rune
 
 A Cargo workspace and the documentation site. [`just`](https://github.com/casey/just) holds the
@@ -87,6 +164,7 @@ just build   # compile every crate
 just test    # nextest for unit and integration tests, then doctests
 just lint    # what CI runs: fmt check and clippy, warnings are errors
 just fix     # apply formatting and machine-fixable lints
+just dist    # assemble and pack this machine's packages, as the release does
 just docs    # documentation site with hot reload
 ```
 
@@ -98,6 +176,14 @@ just docs    # documentation site with hot reload
 | [`rune-out`](crates/rune-out) | Where rune's own output goes, and prefixed group output |
 | [`rune-testkit`](crates/rune-testkit) | A fixture binary the test suites spawn. Never shipped |
 | [`website`](website) | The documentation site |
+
+### Releasing
+
+A release is a merged pull request. Run the **version bump** workflow with the version to release;
+it opens a pull request carrying the new number, the regenerated pins and a generated changelog.
+Merging it builds every platform, runs the binaries under both Linux C libraries, installs the
+packed tarballs on each operating system, checks the warm-run benchmark, and only then publishes —
+with provenance, through OIDC, with no registry token anywhere in this repository.
 
 ## License
 

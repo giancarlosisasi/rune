@@ -46,6 +46,14 @@ mod tests {
     assert_eq!(first_line("0.1.0"), "0.1.0");
   }
 
+  /// The config cache keys on the crate version, and `rune --version` prints the
+  /// embedded one. A bump that moved only one of them would leave an upgraded rune
+  /// serving the previous version's cached answers.
+  #[test]
+  fn the_version_the_crates_are_built_with_is_the_one_that_is_printed() {
+    assert_eq!(super::VERSION, env!("CARGO_PKG_VERSION"));
+  }
+
   #[test]
   fn the_embedded_version_is_three_numbers() {
     let parts: Vec<&str> = super::VERSION.split('.').collect();

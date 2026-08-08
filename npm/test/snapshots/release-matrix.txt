@@ -2,6 +2,8 @@
   {
     "target": "x86_64-pc-windows-msvc",
     "runner": "windows-latest",
+    "builder": "cargo",
+    "binary": "rune.exe",
     "packages": [
       "@giancarlosio/rune-win32-x64",
       "@giancarlosio/rune-win32-arm64"
@@ -10,6 +12,8 @@
   {
     "target": "x86_64-apple-darwin",
     "runner": "macos-latest",
+    "builder": "cargo",
+    "binary": "rune",
     "packages": [
       "@giancarlosio/rune-darwin-x64"
     ]
@@ -17,6 +21,8 @@
   {
     "target": "aarch64-apple-darwin",
     "runner": "macos-latest",
+    "builder": "cargo",
+    "binary": "rune",
     "packages": [
       "@giancarlosio/rune-darwin-arm64"
     ]
@@ -24,6 +30,8 @@
   {
     "target": "x86_64-unknown-linux-musl",
     "runner": "ubuntu-latest",
+    "builder": "cargo-zigbuild",
+    "binary": "rune",
     "packages": [
       "@giancarlosio/rune-linux-x64"
     ]
@@ -31,6 +39,8 @@
   {
     "target": "aarch64-unknown-linux-musl",
     "runner": "ubuntu-latest",
+    "builder": "cargo-zigbuild",
+    "binary": "rune",
     "packages": [
       "@giancarlosio/rune-linux-arm64"
     ]

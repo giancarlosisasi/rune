@@ -40,22 +40,51 @@ test('the committed manifest is what a bump would write', () => {
   assert.deepEqual(withDerivedPins(meta, meta.version), meta);
 });
 
-test('a bump writes the version file the binary embeds', () => {
+// A bump into a throwaway copy of the three files it writes.
+function bumpInto(t, version) {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'rune-bump-'));
-  const manifest = path.join(directory, 'package.json');
-  const version = path.join(directory, 'version.txt');
-  fs.writeFileSync(manifest, JSON.stringify({ ...meta, version: '3.1.4' }, null, 2));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
 
-  bump({ manifestPath: manifest, versionPath: version });
+  const paths = {
+    manifestPath: path.join(directory, 'package.json'),
+    versionPath: path.join(directory, 'version.txt'),
+    cargoPath: path.join(directory, 'Cargo.toml'),
+  };
+  fs.writeFileSync(paths.manifestPath, JSON.stringify({ ...meta, version }, null, 2));
+  fs.copyFileSync(path.join(__dirname, '..', '..', 'Cargo.toml'), paths.cargoPath);
 
-  assert.equal(fs.readFileSync(version, 'utf8'), '3.1.4\n');
-  assert.equal(JSON.parse(fs.readFileSync(manifest, 'utf8')).version, '3.1.4');
+  bump(paths);
+  return paths;
+}
+
+test('a bump writes the version file the binary embeds', (t) => {
+  const { manifestPath, versionPath } = bumpInto(t, '3.1.4');
+
+  assert.equal(fs.readFileSync(versionPath, 'utf8'), '3.1.4\n');
+  assert.equal(JSON.parse(fs.readFileSync(manifestPath, 'utf8')).version, '3.1.4');
   assert.equal(
-    JSON.parse(fs.readFileSync(manifest, 'utf8')).optionalDependencies[
+    JSON.parse(fs.readFileSync(manifestPath, 'utf8')).optionalDependencies[
       '@giancarlosio/rune-darwin-arm64'
     ],
     '3.1.4',
   );
+});
 
-  fs.rmSync(directory, { recursive: true, force: true });
+// The config cache keys on the version compiled into the binary. Left behind by a bump,
+// that key stops moving, and an upgrade that changes how a config is read would serve the
+// previous version's answer out of the cache.
+test('a bump moves the version the crates are built with', (t) => {
+  const { cargoPath } = bumpInto(t, '3.1.4');
+  const cargo = fs.readFileSync(cargoPath, 'utf8');
+
+  assert.match(cargo, /\[workspace\.package\][\s\S]*?\nversion = "3\.1\.4"/);
+});
+
+test('a bump leaves the dependency versions alone', (t) => {
+  const { cargoPath } = bumpInto(t, '3.1.4');
+  const before = fs.readFileSync(path.join(__dirname, '..', '..', 'Cargo.toml'), 'utf8');
+  const after = fs.readFileSync(cargoPath, 'utf8');
+
+  const dependencies = (text) => text.slice(text.indexOf('[workspace.dependencies]'));
+  assert.equal(dependencies(after), dependencies(before));
 });

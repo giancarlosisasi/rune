@@ -1,21 +1,9 @@
 {
-  "name": "rune",
-  "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
-  "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
-  },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
+  "name": "rune-workspace",
+  "version": "0.0.0",
+  "private": true,
+  "description": "The rune workspace: the Rust crates, the npm packaging, and the documentation site.",
+  "license": "MIT",
   "packageManager": "pnpm@11.20.0",
-  "devEngines": {
-    "packageManager": {
-      "name": "pnpm",
-      "version": "11.20.0",
-      "onFail": "download"
-    }
-  },
   "type": "module"
 }

@@ -1,0 +1,78 @@
+name: version bump
+
+# Preparing a release: one pull request carrying the new version and the changelog it
+# earned. Merging it is what publishes, so this workflow chooses nothing and publishes
+# nothing — the version is a deliberate decision and the reviewer sees it before it ships.
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: The version to release, as MAJOR.MINOR.PATCH
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  propose:
+    name: open the release pull request
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: git-cliff
+
+      - name: refuse anything that is not a version
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          echo "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' \
+            || { echo "::error::'$VERSION' is not MAJOR.MINOR.PATCH"; exit 1; }
+
+      # `npm version` writes the meta package's manifest and then runs the `postversion`
+      # hook, which regenerates the six pins and `version.txt` from the platform table.
+      # Nothing here writes a version by hand, so nothing can drift.
+      - name: bump
+        working-directory: npm/rune
+        env:
+          VERSION: ${{ inputs.version }}
+        run: npm version "$VERSION" --no-git-tag-version
+
+      # The hook above is what a maintainer bumping locally relies on. Running it again
+      # here costs nothing — it derives everything from the manifest — and means the
+      # release does not depend on npm's lifecycle behaviour staying what it is today.
+      - run: node npm/scripts/bump-version.js
+
+      - name: write the changelog
+        env:
+          VERSION: ${{ inputs.version }}
+        run: git cliff --unreleased --tag "v$VERSION" --prepend CHANGELOG.md
+
+      - name: open the pull request
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          branch="release/v$VERSION"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$branch"
+          git commit --all --message "release v$VERSION"
+          git push --set-upstream origin "$branch"
+
+          gh pr create \
+            --title "release v$VERSION" \
+            --body "Merging this publishes ${VERSION} to npm with provenance. The pins, \`version.txt\` and the changelog in this diff are all generated." \
+            --base main \
+            --head "$branch"

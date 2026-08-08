@@ -76,7 +76,15 @@ function optionalDependencies(version) {
   return Object.fromEntries(PLATFORMS.map((entry) => [entry.package, version]));
 }
 
-// One build per target triple, carrying the packages that triple's binary fills.
+// zig cross-compiles the QuickJS C source rquickjs bundles without the linker patches a
+// plain rustup target needs against musl. The native builds have no such problem, and
+// paying for zig there would only slow them down.
+function builderFor(target) {
+  return target.endsWith('-linux-musl') ? 'cargo-zigbuild' : 'cargo';
+}
+
+// One build per target triple, carrying the packages that triple's binary fills. This is
+// the release workflow's build matrix, so the workflow never names a platform itself.
 function releaseMatrix() {
   const builds = new Map();
 
@@ -84,6 +92,8 @@ function releaseMatrix() {
     const build = builds.get(entry.target) ?? {
       target: entry.target,
       runner: entry.runner,
+      builder: builderFor(entry.target),
+      binary: entry.binary,
       packages: [],
     };
     build.packages.push(entry.package);

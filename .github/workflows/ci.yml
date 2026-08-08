@@ -9,6 +9,9 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 env:
   CARGO_TERM_COLOR: always
   # Locally a drifted snapshot is accepted through `cargo insta review`. Here there is
@@ -17,8 +20,8 @@ env:
   INSTA_UPDATE: "no"
 
 jobs:
-  check:
-    name: ${{ matrix.os }}
+  rust:
+    name: rust / ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     strategy:
       # Windows is the development machine, so Linux and macOS are the untested halves.
@@ -33,12 +36,40 @@ jobs:
       # exactly what a developer has locally. No version is named twice.
       - uses: Swatinem/rust-cache@v2
 
-      - uses: taiki-e/install-action@nextest
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: just,nextest
 
-      # These two lines are byte-identical to the `just lint` recipe. A green local
-      # lint has to mean a green CI lint.
-      - run: cargo fmt --all --check
-      - run: cargo clippy --workspace --all-targets -- --deny warnings
+      # The justfile holds the definition of both, so a green local run and a green CI
+      # run cannot come to mean two different things.
+      - run: just lint
+      - run: just test ci
 
-      - run: cargo nextest run --workspace --profile ci
-      - run: cargo test --workspace --doc
+  packaging:
+    name: packaging / ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+
+      # One test builds the binary to check that rune accepts every config the published
+      # types accept, so the toolchain has to be here too.
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: just
+
+      - run: pnpm install --frozen-lockfile --filter rune-npm
+      - run: just test-npm
+
+  benchmark:
+    uses: ./.github/workflows/benchmark.yml

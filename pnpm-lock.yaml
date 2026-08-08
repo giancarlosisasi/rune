@@ -207,6 +207,12 @@ importers:
 
   .: {}
 
+  npm:
+    devDependencies:
+      typescript:
+        specifier: ^5.9.0
+        version: 5.9.3
+
   website:
     dependencies:
       '@rspress/core':

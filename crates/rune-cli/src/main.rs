@@ -13,6 +13,10 @@ mod version;
 #[derive(Parser)]
 #[command(
   name = "rune",
+  // Without this, usage is spelled from the file on disk and Windows users are told to
+  // run `rune.exe`. Nobody types that, and it would make the help text differ per
+  // operating system.
+  bin_name = "rune",
   version = version::VERSION,
   about = "Centralized script runner for JS/TS monorepos"
 )]
@@ -25,6 +29,7 @@ struct Cli {
 enum Command {
   /// Run a script by name
   Run {
+    /// The script to run
     name: String,
     /// Resolve against the root config only, ignoring this package's definitions
     #[arg(long)]
@@ -37,6 +42,7 @@ enum Command {
   List,
   /// Show how a script resolves and where it comes from
   Inspect {
+    /// The script to explain
     name: String,
     /// Resolve against the root config only, ignoring this package's definitions
     #[arg(long)]

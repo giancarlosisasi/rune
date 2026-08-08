@@ -1,0 +1,82 @@
+---
+source: crates/rune-cli/tests/cli.rs
+expression: surface
+---
+$ rune --help
+Centralized script runner for JS/TS monorepos
+
+Usage: rune <COMMAND>
+
+Commands:
+  run      Run a script by name
+  list     List all available scripts
+  inspect  Show how a script resolves and where it comes from
+  init     Write a starter rune.config.ts in the current directory
+  cache    Manage the resolved-config cache
+  help     Print this message or the help of the given subcommand(s)
+
+Options:
+  -h, --help     Print help
+  -V, --version  Print version
+
+$ rune run --help
+Run a script by name
+
+Usage: rune run [OPTIONS] <NAME> [-- <ARGS>...]
+
+Arguments:
+  <NAME>     The script to run
+  [ARGS]...  Arguments appended to the script's command, after `--`
+
+Options:
+      --root  Resolve against the root config only, ignoring this package's definitions
+  -h, --help  Print help
+
+$ rune list --help
+List all available scripts
+
+Usage: rune list
+
+Options:
+  -h, --help  Print help
+
+$ rune inspect --help
+Show how a script resolves and where it comes from
+
+Usage: rune inspect [OPTIONS] <NAME>
+
+Arguments:
+  <NAME>  The script to explain
+
+Options:
+      --root  Resolve against the root config only, ignoring this package's definitions
+  -h, --help  Print help
+
+$ rune init --help
+Write a starter rune.config.ts in the current directory
+
+Usage: rune init [OPTIONS]
+
+Options:
+      --from-package-json  Seed the starter with the scripts from the nearest package.json
+  -h, --help               Print help
+
+$ rune cache --help
+Manage the resolved-config cache
+
+Usage: rune cache <COMMAND>
+
+Commands:
+  clear  Remove every cached config result
+  help   Print this message or the help of the given subcommand(s)
+
+Options:
+  -h, --help  Print help
+
+$ rune cache clear --help
+Remove every cached config result
+
+Usage: rune cache clear
+
+Options:
+  -h, --help  Print help

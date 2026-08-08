@@ -1,0 +1,11 @@
+{
+  "name": "@fixture/install-smoke",
+  "version": "0.0.0",
+  "private": true,
+  "description": "A project rune is installed into, so a release is proven the way a user meets it.",
+  "scripts": {
+    "reported-version": "rune --version",
+    "visible-scripts": "rune list",
+    "check": "rune run check"
+  }
+}

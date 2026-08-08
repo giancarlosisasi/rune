@@ -3,6 +3,7 @@
 
 mod harness;
 
+use std::fmt::Write as _;
 use std::fs;
 use std::path::Path;
 
@@ -27,8 +28,8 @@ fn version_is_the_first_line_of_the_file_the_packaging_step_writes() {
   Test::new().args(["--version"]).stdout(&format!("rune {expected}\n")).status(0).run();
 }
 
-/// Test 1.2 — no golden snapshot: the CLI surface still grows in five later changes, so
-/// a full help file would churn five more times and assert nothing in between.
+/// Test 1.2 — help is reachable and names what the binary accepts. The exact text is
+/// test 6b.7's business; this one only has to keep failing if a subcommand disappears.
 #[test]
 fn help_names_every_subcommand() {
   let output = Test::new().args(["--help"]).stdout_regex(r"(?m)^Usage: rune").status(0).run();
@@ -37,6 +38,35 @@ fn help_names_every_subcommand() {
   for subcommand in ["run", "list", "inspect"] {
     assert!(stdout.contains(subcommand), "`--help` does not name `{subcommand}`:\n{stdout}");
   }
+}
+
+/// Test 6b.7 — the whole command-line surface, captured.
+///
+/// Deliberately not written in change 1: the surface grew in six later changes, and a
+/// golden file written then would have churned six times while asserting nothing in
+/// between. It is final for 1.0, so from here a diff in this snapshot is a change to a
+/// published interface — something to review, never something to accept.
+#[test]
+fn the_help_surface_is_the_published_one() {
+  const SURFACE: [&[&str]; 7] = [
+    &["--help"],
+    &["run", "--help"],
+    &["list", "--help"],
+    &["inspect", "--help"],
+    &["init", "--help"],
+    &["cache", "--help"],
+    &["cache", "clear", "--help"],
+  ];
+
+  let mut surface = String::new();
+  for args in SURFACE {
+    let output = Test::new().args(args.iter().copied()).stdout_regex(r"(?s).*").run();
+    let stdout = String::from_utf8(output.stdout).expect("help is utf-8").replace("\r\n", "\n");
+
+    write!(surface, "$ rune {}\n{stdout}\n", args.join(" ")).expect("a String never fails");
+  }
+
+  insta::assert_snapshot!(surface);
 }
 
 /// Test 1.3 — the contract every subcommand inherits: rune's own failures exit non-zero

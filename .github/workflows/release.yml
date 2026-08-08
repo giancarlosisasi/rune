@@ -1,0 +1,272 @@
+name: release
+
+# Merging the version-bump pull request is what publishes. Nothing else does, and there
+# is no manual publish step.
+#
+# `workflow_dispatch` exists for one case: a run that published some packages and then
+# failed. Re-running it completes the release, because the gate decides from the
+# registry's per-package state rather than from whether this workflow has run before.
+on:
+  push:
+    branches: [main]
+    paths:
+      - version.txt
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  # Two releases of the same version race for the registry, and the loser reports a
+  # version conflict that reads like a real defect. They queue instead.
+  group: release
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  plan:
+    name: what is being released
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.read.outputs.version }}
+      build: ${{ steps.read.outputs.build }}
+      libc: ${{ steps.read.outputs.libc }}
+      install: ${{ steps.read.outputs.install }}
+    steps:
+      - uses: actions/checkout@v7
+
+      # Every platform, target triple and runner named in this workflow comes from here.
+      - id: read
+        shell: bash
+        run: |
+          {
+            echo "version=$(head -n 1 version.txt | tr -d '\r')"
+            echo "build=$(node npm/scripts/matrix.js build)"
+            echo "libc=$(node npm/scripts/matrix.js libc)"
+            echo "install=$(node npm/scripts/matrix.js install)"
+          } >> "$GITHUB_OUTPUT"
+
+  build:
+    name: build ${{ matrix.target }}
+    needs: plan
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.plan.outputs.build) }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+      - run: rustup target add ${{ matrix.target }}
+
+      # zig only where it is needed. It cross-compiles the QuickJS C source rquickjs
+      # bundles against musl without the linker patches a plain rustup target needs;
+      # the native builds have no such problem and would only be slowed down by it.
+      - if: matrix.builder == 'cargo-zigbuild'
+        uses: mlugg/setup-zig@v2
+        with:
+          version: 0.16.0
+      - if: matrix.builder == 'cargo-zigbuild'
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-zigbuild
+
+      - run: ${{ matrix.builder }} build --release --bin rune --target ${{ matrix.target }}
+
+      - name: keep the binary and nothing beside it
+        shell: bash
+        run: |
+          mkdir -p staged
+          cp "target/${{ matrix.target }}/release/${{ matrix.binary }}" staged/
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: binary-${{ matrix.target }}
+          path: staged/${{ matrix.binary }}
+          if-no-files-found: error
+
+  libc:
+    name: ${{ matrix.target }} on ${{ matrix.libc }}
+    needs: [plan, build]
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.plan.outputs.libc) }}
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: binary-${{ matrix.target }}
+          path: linux
+
+      # The arm64 binaries run under emulation. Asking only about the version keeps that
+      # cheap, and the version is the whole question: a binary that starts and reports
+      # itself has resolved every symbol it needs.
+      - uses: docker/setup-qemu-action@v4
+        if: matrix.platform != 'linux/amd64'
+
+      - name: run the release binary under ${{ matrix.libc }}
+        shell: bash
+        run: |
+          chmod +x linux/rune
+          reported=$(docker run --rm --init --platform ${{ matrix.platform }} \
+            -v "$PWD/linux:/opt/rune-release:ro" ${{ matrix.image }} /opt/rune-release/rune --version)
+
+          echo "$reported"
+          test "$reported" = "rune ${{ needs.plan.outputs.version }}"
+
+  package:
+    name: assemble and pack
+    needs: [plan, build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: binary-*
+          path: artifacts
+
+      # Assembling sets the executable bit, which no artifact round trip preserves, and
+      # then checks that the meta package's pins name exactly what was built.
+      - run: node npm/scripts/assemble-release.js artifacts
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: tarballs
+          path: npm/dist/tarballs
+          if-no-files-found: error
+
+  install:
+    name: install on ${{ matrix.runner }}
+    needs: [plan, package]
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: ${{ fromJSON(needs.plan.outputs.install) }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: tarballs
+          path: tarballs
+
+      - run: node npm/scripts/smoke-install.js tarballs
+
+  install-musl:
+    name: install on linux with musl
+    needs: [plan, package]
+    runs-on: ubuntu-latest
+    # A package manager on Alpine is where a binary that turned out to need the GNU C
+    # library would finally say so, and it is the one combination no runner image has.
+    container: node:24-alpine
+    defaults:
+      run:
+        # The image has no bash, which is what a step would otherwise be run with.
+        shell: sh -eu {0}
+    steps:
+      # `actions/checkout` clones with git when git is there and falls back to a slower
+      # archive download when it is not. Installing it keeps the fast path.
+      - run: apk add --no-cache git
+
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          name: tarballs
+          path: tarballs
+
+      - run: node npm/scripts/smoke-install.js tarballs
+
+  benchmark:
+    needs: plan
+    uses: ./.github/workflows/benchmark.yml
+
+  publish:
+    name: publish
+    needs: [plan, libc, install, install-musl, benchmark]
+    runs-on: ubuntu-latest
+    permissions:
+      # Trusted publishing: npm gets a short-lived credential issued for this workflow
+      # run. No long-lived registry token exists in this repository at all, and a token
+      # that does not exist cannot leak.
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+
+      # Pinned on purpose. Provenance publishing has a minimum version, and an unpinned
+      # tool changes underneath a release.
+      - run: npm install --global npm@11.11.0
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: tarballs
+          path: tarballs
+
+      # Packed tarballs rather than directories, platform packages before the meta
+      # package, and only the packages the registry does not already carry.
+      - run: node npm/scripts/publish.js tarballs
+
+  github-release:
+    name: github release
+    needs: [plan, publish]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: git-cliff
+
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: binary-*
+          path: artifacts
+
+      - name: name every binary after the platform it runs on
+        shell: bash
+        run: |
+          mkdir -p release
+          for directory in artifacts/binary-*; do
+            target=${directory#artifacts/binary-}
+            for binary in "$directory"/*; do
+              case "$binary" in
+                *.exe) cp "$binary" "release/rune-$target.exe" ;;
+                *) cp "$binary" "release/rune-$target" ;;
+              esac
+            done
+          done
+
+      - name: publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.plan.outputs.version }}
+        shell: bash
+        run: |
+          # The tag does not exist yet, so the notes are the unreleased commits rendered
+          # under the version they are about to become.
+          git cliff --unreleased --tag "v$VERSION" --strip all --output notes.md
+          gh release create "v$VERSION" release/* \
+            --title "v$VERSION" \
+            --notes-file notes.md

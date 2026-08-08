@@ -17,6 +17,10 @@ const META_SOURCE = path.join(__dirname, '..', 'rune');
 const WORKSPACE = path.join(__dirname, '..', '..');
 const DEFAULT_OUTPUT = path.join(__dirname, '..', 'dist');
 
+// What was packed, written beside the tarballs. The publish step reads it rather than
+// working the file names out again from the version and the package names.
+const PACKED = 'packed.json';
+
 const EXECUTABLE = 0o755;
 
 function version() {
@@ -57,13 +61,46 @@ function assemblePlatform(outDirectory, entry, binaryPath, packageVersion) {
   return target;
 }
 
+// npm reports the name it gave the tarball, so nothing here has to predict it.
 function pack(directory, destination) {
   fs.mkdirSync(destination, { recursive: true });
-  runNpm(['pack', '--pack-destination', destination], { cwd: directory });
+  const report = runNpm(['pack', '--json', '--pack-destination', destination], { cwd: directory });
+
+  return JSON.parse(String(report))[0].filename;
 }
 
-// What `just dist` runs: the host's own release build, packed the way the pipeline packs
-// the five it builds.
+// Assemble and pack every package whose binary `binaryFor` can supply, and record what
+// came out. The record is what the publish step validates the meta package's pins
+// against: "what was built" is then a file, not an assumption.
+function packRelease({ outDirectory = DEFAULT_OUTPUT, binaryFor, entries = platforms.PLATFORMS }) {
+  const packageVersion = version();
+  const tarballs = path.join(outDirectory, 'tarballs');
+  fs.rmSync(tarballs, { recursive: true, force: true });
+
+  const packed = entries.map((entry) => ({
+    name: entry.package,
+    version: packageVersion,
+    tarball: pack(
+      assemblePlatform(outDirectory, entry, binaryFor(entry), packageVersion),
+      tarballs,
+    ),
+  }));
+
+  const meta = JSON.parse(fs.readFileSync(path.join(META_SOURCE, 'package.json'), 'utf8'));
+  packed.push({
+    name: meta.name,
+    version: packageVersion,
+    tarball: pack(assembleMeta(outDirectory), tarballs),
+  });
+
+  const record = { version: packageVersion, packed };
+  fs.writeFileSync(path.join(tarballs, PACKED), `${JSON.stringify(record, null, 2)}\n`);
+
+  return { ...record, directory: tarballs };
+}
+
+// What `just dist` runs: this machine's own release build, packed the way the pipeline
+// packs the five it builds.
 function main() {
   const entry = platforms.entryFor(process.platform, process.arch);
   if (!entry) {
@@ -75,23 +112,15 @@ function main() {
     throw new Error(`no release binary at ${built} — run \`cargo build --release\` first`);
   }
 
-  const outDirectory = DEFAULT_OUTPUT;
-  const tarballs = path.join(outDirectory, 'tarballs');
-  fs.rmSync(tarballs, { recursive: true, force: true });
+  const release = packRelease({ binaryFor: () => built, entries: [entry] });
 
-  const packaged = [
-    assemblePlatform(outDirectory, entry, built, version()),
-    assembleMeta(outDirectory),
-  ];
-  for (const directory of packaged) {
-    pack(directory, tarballs);
-  }
-
-  process.stdout.write(`packed ${fs.readdirSync(tarballs).join(', ')}\ninto ${tarballs}\n`);
+  process.stdout.write(
+    `packed ${release.packed.map((one) => one.tarball).join(', ')}\ninto ${release.directory}\n`,
+  );
 }
 
 if (require.main === module) {
   main();
 }
 
-module.exports = { assembleMeta, assemblePlatform, pack, version };
+module.exports = { PACKED, assembleMeta, assemblePlatform, pack, packRelease, version };

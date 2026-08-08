@@ -1,0 +1,30 @@
+name: benchmark
+
+# Gate G8. Called by `ci` on every pull request, so a regression is caught where it is
+# introduced, and by `release` before anything is published, so nothing ships over budget.
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  warm-run:
+    name: warm run within budget
+    # One machine class, always, so the number means the same thing release over release.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: hyperfine
+
+      # The claim is about the shipped binary, so the shipped profile is what is measured.
+      - run: cargo build --release --bin rune
+
+      - run: node npm/scripts/benchmark.js target/release/rune

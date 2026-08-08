@@ -7,13 +7,17 @@ _default:
 build:
   cargo build --workspace
 
-# Run all tests
-# Run all tests: nextest for unit + integration, cargo for doctests
-test:
-  cargo nextest run --workspace
+# Run all tests: nextest for unit + integration, cargo for doctests.
+# The nextest profile is `default` here and `ci` in the workflow.
+test profile="default":
+  # `rune-testkit` is a plain binary with no tests of its own, so a test build never
+  # selects it. The suites spawn it, so it has to be built on purpose.
+  cargo build --workspace --bins
+  cargo nextest run --workspace --profile {{profile}}
   cargo test --workspace --doc
 
-# Run the packaging tests: the wrapper, the platform table, and the published types
+# Run the packaging and release tests: the wrapper, the platform table, the published
+# types, and the decisions the release makes before it publishes
 test-npm:
   node --test "npm/test/**/*.test.js"
 
@@ -32,6 +36,21 @@ fix:
 dist:
   cargo build --release
   node npm/scripts/dist.js
+
+# Install the packed tarballs into the fixture project and run scripts through npm,
+# the way the pipeline does on every operating system before it publishes anything
+smoke:
+  node npm/scripts/smoke-install.js
+
+# Gate G8: measure a warm run against the budget, as the release does
+bench:
+  cargo build --release --bin rune
+  node npm/scripts/benchmark.js
+
+# Rehearse a release without publishing: the gate, the pin validation, the packaging and
+# the retry wrapper all run; nothing reaches the registry
+release-rehearsal: dist smoke
+  node npm/scripts/rehearse.js
 
 # Serve the documentation site with hot reload
 docs:

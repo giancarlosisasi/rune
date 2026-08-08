@@ -153,6 +153,10 @@ fn attach(child: &Child, _own_group: bool, _kill: Kill) -> io::Result<Tree> {
 }
 
 #[cfg(unix)]
+#[expect(
+  clippy::unnecessary_wraps,
+  reason = "nothing here can fail, but the Windows counterpart opens a job object and can"
+)]
 fn attach(child: &Child, own_group: bool, kill: Kill) -> io::Result<Tree> {
   let pid = child.id().unwrap_or_default();
 

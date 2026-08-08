@@ -163,7 +163,7 @@ mod unix {
       let _ = unsafe { sigaction(signal, &action) };
     }
 
-    std::thread::spawn(move || listen(read));
+    std::thread::spawn(move || listen(&read));
   }
 
   /// Async-signal-safe by construction: `errno` saved and restored around one `write`,
@@ -180,14 +180,15 @@ mod unix {
     nix::errno::Errno::set_raw(saved);
   }
 
-  fn listen(read: std::os::fd::OwnedFd) {
+  fn listen(read: &std::os::fd::OwnedFd) {
     let mut byte = [0_u8; 1];
     loop {
-      match unistd::read(&read, &mut byte) {
+      match unistd::read(read, &mut byte) {
         Ok(1) => {}
-        Ok(_) => return,
         Err(nix::errno::Errno::EINTR) => continue,
-        Err(_) => return,
+        // A short read means the write end is gone, and any other error means the pipe
+        // cannot be read again. Either way there is nothing left to listen for.
+        _ => return,
       }
 
       let signal = i32::from(byte[0]);
