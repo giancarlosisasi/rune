@@ -1208,7 +1208,7 @@ dependencies = [
 
 [[package]]
 name = "rune-cli"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "clap",
  "insta",
@@ -1226,7 +1226,7 @@ dependencies = [
 
 [[package]]
 name = "rune-config"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "blake3",
  "dotenvy",
@@ -1244,7 +1244,7 @@ dependencies = [
 
 [[package]]
 name = "rune-exec"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "futures-util",
  "nix 0.31.3",
@@ -1256,7 +1256,7 @@ dependencies = [
 
 [[package]]
 name = "rune-out"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anstyle",
  "insta",
@@ -1266,7 +1266,7 @@ dependencies = [
 
 [[package]]
 name = "rune-testkit"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "nix 0.31.3",
  "rune-exec",
