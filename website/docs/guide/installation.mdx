@@ -33,8 +33,9 @@ released together and always match.
 
 ## The first config
 
-`rune init` writes a starter config next to the nearest `package.json`, with the fields commented.
-It refuses to overwrite an existing file.
+`rune init` writes `rune.config.ts` into the directory it is run from, with a comment header naming
+every field the version that wrote it accepts. It refuses to overwrite an existing file. Run it at
+the repository root.
 
 <PackageManagerTabs command={{
   npm: 'npx rune init',
@@ -43,23 +44,26 @@ It refuses to overwrite an existing file.
   bun: 'bun rune init',
 }} />
 
-The result:
+The result, under the comment header:
 
 ```ts title="rune.config.ts"
-import { defineConfig } from '@giancarlosio/rune';
-
-export default defineConfig({
+export default {
   scripts: {
-    build: {
-      command: 'tsc --build',
-      description: 'Compile every package',
+    hello: {
+      command: "echo rune is set up",
+      description: "Check that rune can run a script",
     },
   },
-});
+};
 ```
 
-Put this file at the repository root. Rune finds it by walking up from wherever it is invoked, so
-a run from `packages/api/src` uses the same config as a run from the root.
+`rune list` and `rune run hello` both work immediately. [rune init](/cli/init) shows the full file.
+
+Rune finds the config by walking up from wherever it is invoked, so a run from `packages/api/src`
+uses the same config as a run from the root.
+
+Adding `import { defineConfig } from '@giancarlosio/rune'` and wrapping the object gives you editor
+autocomplete. Rune supplies that module itself, so it works with nothing installed.
 
 ## Node version
 

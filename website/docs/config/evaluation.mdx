@@ -75,14 +75,14 @@ The engine is not Node. Reaching for a Node global or module produces a message 
 available:
 
 ```
-error: `fs` is not available in a rune config.
+Error: `process` is not available in a rune config.
 
-rune evaluates this file with an embedded JavaScript engine, not Node.js,
-so Node globals and modules do not exist here.
+rune evaluates this file with an embedded JavaScript engine, not Node.js, so Node globals and modules do not exist here.
 
 what does work:
   - `rune.env`, `rune.platform`, `rune.isCI`
   - relative imports of other files in this repository, such as `./scripts/helpers.ts`
+  - `import { defineConfig } from "@giancarlosio/rune"` — the one package rune supplies itself
   - `import type` from any npm package — type-only imports are erased before evaluation
 ```
 
@@ -98,6 +98,19 @@ Type-only imports from npm packages are fine, because they are erased before any
 ```ts
 import type { Script } from '@giancarlosio/rune';
 ```
+
+## The one package Rune supplies
+
+`@giancarlosio/rune` is answered from inside the binary rather than resolved from `node_modules`, so
+the authoring style the types teach loads before a package manager has installed anything.
+
+```ts
+import { defineConfig } from '@giancarlosio/rune';
+```
+
+It exports `defineConfig` and nothing else, and `defineConfig` returns its argument unchanged — it
+exists to carry the types. Importing any other name from it fails rather than handing the config an
+undefined value. No other bare specifier is supplied.
 
 Dynamic `import()` is rejected for cache integrity. A computed specifier cannot be found by the
 static import walk, so it would escape the hashed import graph and serve a stale result.
@@ -137,6 +150,8 @@ rune cache clear
 
 ## Budget
 
+The targets the implementation is held to:
+
 | Stage | Target |
 | --- | --- |
 | Binary startup | under 3 ms |
@@ -144,5 +159,3 @@ rune cache clear
 | Cold config, strip and evaluate | under 30 ms |
 | Spawn overhead for a single script | close to zero |
 | Total, warm | under 5 ms |
-
-A benchmark in CI fails the build when the warm total regresses.

@@ -13,14 +13,14 @@ Prints every script the current directory can run, sorted by name, with its desc
 
 ```
 $ rune list
-build    Compile every package with tsc
-ci       Build, then test, then lint
-lint     Check formatting and lint rules
-test     Run unit tests
+build  Compile every package with tsc
+ci     Build, then test, then lint
+lint   Check formatting and lint rules
+test   Run unit tests
 ```
 
-Names are padded to a common width so descriptions align. A script with no `description` prints its
-name alone.
+Names are padded to the width of the longest one so descriptions align. A script with no
+`description` prints its name alone.
 
 ## Provenance
 
@@ -28,12 +28,15 @@ Where a package config is involved, the source of each script is annotated:
 
 ```
 $ cd packages/legacy && rune list
-build    Compile every package with tsc
-ci       Build, then test, then lint
-lint     Check formatting and lint rules
-test     Run unit tests                     (overridden here)
+build      Compile every package with tsc
+ci         Build, then test, then lint
+lint       Check formatting and lint rules
+test       Run unit tests                   (overridden here)
 typecheck  Type-check the legacy sources    (defined here)
 ```
+
+Descriptions are padded into a column only when something needs to line up beside them, so a
+repository with no package configs keeps the two-column output above.
 
 | Annotation | Meaning |
 | --- | --- |

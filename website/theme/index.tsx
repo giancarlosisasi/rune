@@ -5,7 +5,7 @@ import './index.css';
 export * from '@rspress/core/theme-original';
 
 const AUTHOR_URL = 'https://github.com/giancarlosisasi';
-const REPO_URL = 'https://github.com/giancarlosio/rune';
+const REPO_URL = 'https://github.com/giancarlosisasi/rune';
 
 function Footer() {
   return (
@@ -14,7 +14,7 @@ function Footer() {
         <nav className="rune-footer__links">
           <a href={REPO_URL}>GitHub</a>
           <a href={`${REPO_URL}/blob/main/LICENSE`}>License</a>
-          <a href={`${REPO_URL}/blob/main/CONTRIBUTING.md`}>Contributing</a>
+          <a href={`${REPO_URL}/issues`}>Issues</a>
         </nav>
         <span>
           Built by{' '}

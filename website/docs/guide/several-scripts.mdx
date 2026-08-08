@@ -30,14 +30,15 @@ export default defineConfig({
 
 ```
 $ rune run ci
-[build] compiled 14 packages in 3.2 s
-[test]  41 passed, 41 total
-error: script `ci` failed at member `test` (exit 1)
-       later members did not start: lint
+compiled 14 packages in 3.2 s
+41 failed, 2 passed
+$ echo $?
+1
 ```
 
-Only one process runs at a time, so each member has the terminal to itself and interactive tools
-behave normally.
+Only one process runs at a time, so each member has the terminal to itself, its output is not
+prefixed, and interactive tools behave normally. `lint` never started, and the group exited with
+the code `test` produced.
 
 ## A set that runs side by side
 
@@ -60,15 +61,15 @@ export default defineConfig({
 
 ```
 $ rune run dev
-[dev:api]  listening on http://localhost:4000
-[dev:web]  vite v6.0.1  ready in 412 ms
-[dev:web]  ➜ Local:   http://localhost:5173/
-[dev:api]  Error: ECONNREFUSED 127.0.0.1:5432
-error: member `dev:api` exited 1 — stopping `dev:web`
+[dev:api] listening on http://localhost:4000
+[dev:web] vite v6.0.1  ready in 412 ms
+[dev:web] ➜ Local:   http://localhost:5173/
+[dev:api] Error: ECONNREFUSED 127.0.0.1:5432
 ```
 
-One member failing stops the others by default, so a broken API does not leave a web server running
-against nothing. `continueOnError: true` lets them all finish.
+One member failing stops the others by default, taking their whole process trees with them, so a
+broken API does not leave a web server running against nothing. The group exits with the code of
+the member that failed first. `continueOnError: true` lets them all finish.
 
 ## A prerequisite in front of one script
 

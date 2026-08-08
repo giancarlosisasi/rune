@@ -16,28 +16,40 @@ type PerOsCommand = {
   linux?: string;
 };
 
-type ScriptBase = {
+type KillSignal = 'SIGHUP' | 'SIGINT' | 'SIGQUIT' | 'SIGTERM' | 'SIGKILL';
+
+type Common = {
   description?: string;
   cwd?: string;
   env?: Record<string, string>;
   envFile?: string;
 };
 
-type Lifecycle = {
+// A delay without retries is meaningless, so the types refuse it.
+type Retrying =
+  | { retries: number; retryDelay?: number | 'exponential' }
+  | { retries?: never; retryDelay?: never };
+
+type Lifecycle = Retrying & {
   timeout?: number;
-  retries?: number;
-  retryDelay?: number | 'exponential';
-  killSignal?: string;
+  killSignal?: KillSignal;
   killTimeout?: number;
   interactive?: boolean;
 };
 
 export type Script =
-  | (ScriptBase & Lifecycle & { command: string | PerOsCommand; dependsOn?: string[] })
-  | (ScriptBase & Lifecycle & { extends: string; appendArgs?: string[]; dependsOn?: string[] })
-  | (ScriptBase & { serial: string[]; continueOnError?: boolean })
-  | (ScriptBase & { parallel: string[]; continueOnError?: boolean; successPolicy?: SuccessPolicy });
+  | (Common & Lifecycle & { command: string | PerOsCommand; dependsOn?: string[] })
+  | (Common & Lifecycle & { extends: string; appendArgs?: string[]; dependsOn?: string[] })
+  | (Common & { serial: string[]; continueOnError?: boolean })
+  | (Common & {
+      parallel: string[];
+      continueOnError?: boolean;
+      successPolicy?: 'all' | 'first' | 'last';
+    });
 ```
+
+The published types also mark every field that belongs to another variant as `never`, so mixing two
+of them is a type error rather than a runtime one.
 
 The same rules are enforced twice: by these types when the config is written, and by Rune when it
 is loaded. A fixture test asserts that anything `tsc` accepts, Rune accepts.
@@ -112,11 +124,12 @@ about "the shape" useless.
 
 | Mistake | Message |
 | --- | --- |
-| No variant key | ``script `empty` has no command`` followed by the legal keys |
-| Two variant keys | ``script `test` sets both `command` and `extends` — a script may only be one kind`` |
-| Misspelled field | ``script `test` has an unknown field `comand``` followed by what is allowed there |
+| No variant key | ``script `empty` has no command``, then ``every script needs one of: `command`, `extends`, `serial`, `parallel` `` |
+| Two variant keys | ``script `ci` sets both `command` and `extends``` , then what each one does |
+| Misspelled field | ``script `test` has an unknown field `comand```, then the fields allowed there |
 | Entry is not an object | ``script `dev` must be an object; found a string`` |
-| No `scripts` key | ``the config must be an object with a `scripts` object; found an array`` |
+| Not a default-exported object | ``rune.config.ts: a rune config must default-export an object``, with an example |
+| Per-OS `command` with no `default` | ``script `clean` has a per-operating-system `command` with no `default` `` |
 
 An unknown field is an error rather than a warning. Silent acceptance of `retires` instead of
 `retries` means the option never takes effect and nothing says so.

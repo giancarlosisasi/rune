@@ -46,7 +46,7 @@ the environment is skipped, and the skip is reported on stderr with the variable
 reason:
 
 ```
-warning: DATABASE_URL in .env.test was ignored — already set in the environment
+warning: `DATABASE_URL` from `.env.test` was ignored: the process environment already sets it
 ```
 
 This makes a one-off override work the way it looks like it should:
@@ -58,7 +58,16 @@ DATABASE_URL=postgres://localhost/scratch pnpm test
 Without the rule, the file would silently win and the command above would do nothing.
 
 A missing `envFile` is an error, not a warning. A test suite that runs against the wrong database
-because a file was renamed is worse than a failed run.
+because a file was renamed is worse than a failed run. The message names the script, the path the
+file resolved to, and the config that declared it. A line that cannot be parsed as an assignment is
+an error too, naming the file and the line number.
+
+### Across an extends chain
+
+Every level of an `extends` chain contributes its own `envFile`, and each one fills gaps only. The
+files are consulted from the level nearest the script outward, so the nearer config wins a variable
+both of them set, and the outer file's assignment is reported as ignored — the same way a config
+narrowing what it inherits narrows its `env` map.
 
 ## The RUNE_ prefix
 
@@ -66,7 +75,7 @@ Names beginning with `RUNE_` are reserved. An attempt to set one from a file or 
 ignored and reported:
 
 ```
-warning: RUNE_ROOT in the env map was ignored — RUNE_ is reserved
+warning: `RUNE_ROOT` from this script's `env` was ignored: `RUNE_` is reserved for rune's own variables
 ```
 
 Rune sets three of them for every script:
@@ -82,10 +91,12 @@ Rune sets three of them for every script:
 Rune prepends every `node_modules/.bin` directory from the package directory up to the config root,
 most specific first, using the platform separator.
 
-For a run in `packages/api` of a repository rooted at `/repo`:
+Every level in between is included, not just the two ends. For a run in `packages/api` of a
+repository rooted at `/repo`:
 
 ```
 /repo/packages/api/node_modules/.bin
+/repo/packages/node_modules/.bin
 /repo/node_modules/.bin
 <the inherited PATH>
 ```
@@ -105,18 +116,20 @@ not the caller. Rune merges case-insensitively there, so a child never receives 
 
 ## Seeing the result
 
-`rune inspect` prints the delta against the current environment, including the assignments that
-were ignored.
+`rune inspect` prints what the config contributes, including the assignments that were ignored.
 
 ```
 $ rune inspect test
-  command     vitest run
-  cwd         /repo/packages/api
-  env         NODE_ENV=test              from .env.test
-              RUNE_SCRIPT_NAME=test
-              RUNE_ROOT=/repo
-              RUNE_PACKAGE_DIR=/repo/packages/api
-  ignored     DATABASE_URL               .env.test, already set
-  path        + packages/api/node_modules/.bin
-              + node_modules/.bin
+test
+
+command      vitest run
+directory    packages/api
+environment  NODE_ENV=test
+ignored      `DATABASE_URL` from `.env.test` was ignored: the process environment already sets it
+
+resolved through
+  rune.config.ts  test  runs `vitest run`
 ```
+
+`PATH` and the three `RUNE_` variables are not in the delta. Rune sets them for every script, so
+listing them would say nothing about this one.

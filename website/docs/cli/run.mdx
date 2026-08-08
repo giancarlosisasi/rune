@@ -59,7 +59,7 @@ full table is on [Exit codes](/reference/exit-codes).
 
 ```
 $ rune run biuld
-error: no script named `biuld`
+no script named `biuld`
 
 did you mean `build`?
 
@@ -77,7 +77,7 @@ first time.
 
 ```
 $ rune run test
-error: no rune.config.ts found
+no rune.config.ts found
 
 searched upward from /tmp/scratch and stopped at the repository boundary.
 
@@ -85,6 +85,21 @@ create one at the root of your repository with:
 
   rune init
 ```
+
+## Running a group
+
+`name` may be a `serial` or `parallel` group. A group has no command of its own, so it takes no
+arguments after `--`:
+
+```
+$ rune run ci -- --watch
+`ci` runs other scripts, so it has no command for these arguments to join
+
+arguments after `--` go to one command. Name the member that needs them:
+  rune run <member> -- ...
+```
+
+See [Groups](/config/groups).
 
 ## The shell
 

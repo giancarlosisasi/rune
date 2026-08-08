@@ -34,7 +34,26 @@ the names that form it.
 `appendArgs` entries are quoted per element for the shell that will run the command, the same way
 arguments after `--` are. An entry containing a space arrives as one argument.
 
-`appendArgs` without `extends` is a type error, and Rune rejects it as an unknown field.
+`appendArgs` without `extends` is a type error, and Rune rejects it when the config loads:
+
+```
+script `test` sets `appendArgs` but does not extend anything
+
+`appendArgs` adds arguments to a command a script inherits, so it only means something
+next to `extends`. A script with a `command` of its own writes its arguments into it.
+```
+
+### A group cannot be extended
+
+`extends` may only name a script that has a command. A group has none of its own, so there would be
+nothing for the inherited arguments to join:
+
+```
+script `x` extends `g`, which is a group
+
+`extends` builds on the command a script runs, and a group has none of its own — it names
+the scripts it runs. To reuse a group, name it as a member of another group.
+```
 
 ## Package overrides
 
@@ -57,12 +76,14 @@ else it runs the root command. Neither `package.json` changed.
 A package config that gives a colliding name its own `command` is a validation error:
 
 ```
-error: packages/legacy/rune.config.ts is not a valid rune config
+packages/legacy/rune.config.ts redefines the root script `test` with `command`
 
-script `test` also exists at the repository root.
-an override may extend a script, not replace it.
+a package may extend a script the root defines, never replace it:
 
-either write `extends: 'test'`, or give this script a different name.
+  test: { extends: "test", appendArgs: ["--your-flag"] }
+
+replacing it would leave this package behind the next time the root definition changes,
+and nothing would say so. A genuinely different command deserves a name of its own.
 ```
 
 The reason is what the tool is for. A `test` that means one command in nine packages and something
@@ -85,11 +106,14 @@ rune run test --root
 
 ```
 $ rune inspect test
-  script      test
-  defined     rune.config.ts:12                    root
-  overridden  packages/legacy/rune.config.ts:4     + --maxWorkers=1
-  command     vitest run --reporter=dot --maxWorkers=1
-  cwd         /repo/packages/legacy
+test
+
+command      vitest run --reporter=dot --maxWorkers=1
+directory    packages/legacy
+
+resolved through
+  rune.config.ts                  test  runs `vitest run --reporter=dot`
+  packages/legacy/rune.config.ts  test  appends `--maxWorkers=1`
 ```
 
 `rune list` annotates the same information more briefly: `(defined here)` for a script this package

@@ -30,18 +30,22 @@ directory containing a `.git` entry or at the filesystem root.
 The boundary matters. Without it, a run from a scratch directory keeps walking and picks up an
 unrelated config from somewhere else on the machine, and the result depends on whose machine it is.
 
-Two directories come out of that walk:
+The walk records every `rune.config.ts` it passes, not only the first. Two of them matter: the
+**root config**, the last one found before the boundary, and the **package config**, the nearest
+one at or above the working directory when that is not the root config itself.
+
+Two directories come out of the same walk:
 
 | Name | Definition |
 | --- | --- |
-| Config root | The directory holding the config that was found |
-| Package directory | The nearest ancestor of the working directory containing a `package.json` |
+| Config root | The directory holding the root config |
+| Package directory | The nearest ancestor of the working directory containing a `package.json`, or the working directory |
 
 When no config is found:
 
 ```
 $ rune list
-error: no rune.config.ts found
+no rune.config.ts found
 
 searched upward from /tmp/scratch and stopped at the repository boundary.
 

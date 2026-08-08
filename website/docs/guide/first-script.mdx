@@ -59,13 +59,17 @@ containing `.git`. It records two directories from that walk:
 
 ## What the child process receives
 
-Before spawning, Rune builds the child's environment in four layers. Later layers win.
+Before spawning, Rune builds the child's environment in layers. Later layers win.
 
 1. The parent environment, unchanged.
 2. `PATH`, with every `node_modules/.bin` from the package directory up to the config root
    prepended, most specific first. This is what makes the bare name `vitest` resolve.
-3. `RUNE_SCRIPT_NAME`, `RUNE_ROOT` and `RUNE_PACKAGE_DIR`.
-4. The script's own `env` map.
+3. The script's `envFile`, filling gaps only. It never overrides a variable that is already set.
+4. The script's own `env` map, which wins over everything above it.
+5. `RUNE_SCRIPT_NAME`, `RUNE_ROOT` and `RUNE_PACKAGE_DIR`, applied last so nothing a config wrote
+   can tell a script it is running somewhere it is not.
+
+[Environment](/config/environment) has the full precedence table.
 
 The child then inherits Rune's standard input, output and error untouched. Colour, progress bars,
 watch mode and interactive prompts behave as they do without Rune in front of them.
@@ -92,7 +96,7 @@ will receive it.
 
 ```
 $ rune run tset
-error: no script named `tset`
+no script named `tset`
 
 did you mean `test`?
 

@@ -30,7 +30,13 @@ The group stops at the first failure and exits with that member's code. Later me
 code once they have all finished.
 
 Because only one process runs at a time, a serial group behaves exactly like a single script: the
-child inherits the terminal, and interactive tools work untouched.
+child inherits the terminal, its output is not prefixed, and interactive tools work untouched.
+
+```
+$ rune run ci
+compiled 14 packages in 3.2 s
+41 passed, 41 total
+```
 
 ## dependsOn
 
@@ -60,13 +66,16 @@ dev: {
 ```
 
 ```
-[api]  listening on http://localhost:4000
-[web]  vite v6.0.1  ready in 412 ms
-[web]  ➜ Local:   http://localhost:5173/
+[dev:api] listening on http://localhost:4000
+[dev:web] vite v6.0.1  ready in 412 ms
+[dev:web] ➜ Local:   http://localhost:5173/
 ```
 
 Prefix colours are stable per script for the life of the run. See
 [Prefixed output](/reference/output) for how interleaving, partial lines and colour are handled.
+
+A parallel group with exactly one member is not piped and not prefixed. It runs with the terminal
+inherited, exactly as a single script would.
 
 ### Failure
 
@@ -75,12 +84,10 @@ By default, one member failing terminates the rest. Each surviving member gets `
 member's whole process tree is terminated through its job object. A member that had already exited
 is not an error.
 
-```
-error: member `api` exited 1 — stopping `web`
-       web terminated after SIGTERM (0.04 s)
-```
+Output already produced by a terminated member is flushed before Rune exits, so a killed process
+never loses its last lines.
 
-`continueOnError: true` lets the others finish.
+`continueOnError: true` lets the others finish. The group still fails.
 
 ### successPolicy
 
@@ -125,8 +132,54 @@ The full table is on [Exit codes](/reference/exit-codes).
 ## What a group cannot carry
 
 A group entry accepts `description`, `cwd`, `env`, `envFile`, `continueOnError` and, for parallel,
-`successPolicy`. It does not accept `command`, `timeout`, `retries`, `killSignal` or `interactive`.
-Those describe a process, and a group is not one. Put them on the members.
+`successPolicy`. Everything else is refused when the config loads, each with its own message.
+
+| On a group | Why it is refused |
+| --- | --- |
+| `command`, `extends`, `appendArgs` | A script is exactly one kind |
+| `timeout`, `retries`, `retryDelay`, `killSignal`, `killTimeout` | They describe how one process is run, and a group is not a process |
+| `interactive` | It describes one process's relationship with the terminal, and only one member can own it |
+| `dependsOn` | A group runs the scripts it names and nothing before them |
+| `successPolicy` on a `serial` group | Members run one at a time, so first and last are already the member list |
+
+Put them on the members instead. To run something before a group, make it the first member of a
+`serial` group with the original one after it.
+
+## Arguments after --
+
+A group has no command of its own, so there is nothing for pass-through arguments to join:
+
+```
+$ rune run ci -- --watch
+`ci` runs other scripts, so it has no command for these arguments to join
+
+arguments after `--` go to one command. Name the member that needs them:
+  rune run <member> -- ...
+```
+
+Appending them to every member would run a flag against tools that never asked for it, and
+discarding them would lose what you typed without saying so.
+
+## Nesting
 
 Groups nest. A `parallel` group may list a `serial` group as a member, which is how a sequence runs
-alongside a watcher. There are no dependency edges between members of one group; nest instead.
+alongside a watcher. Nesting runs flat: the inner group's members run at the point the outer group
+reaches them, and an inner failure propagates outward under the same rules.
+
+There are no dependency edges between the members of one group. Nesting is the mechanism for
+expressing structure.
+
+## Member names are checked at load time
+
+Every name in `serial`, `parallel` and `dependsOn` is resolved when the config loads, not when the
+group runs. A name no script defines names the group, the member and the closest match:
+
+```
+script `ci` names `tset` as a member, which no script defines
+
+did you mean `test`?
+```
+
+A group that reaches itself through any chain of members or prerequisites is a cycle error printing
+the path. Deferring either check to run time would let a typo in the third member surface only
+after the first two had already had effects.

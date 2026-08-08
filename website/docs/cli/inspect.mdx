@@ -10,76 +10,119 @@ rune inspect <name> [--root]
 ```
 
 Prints exactly what `rune run <name>` would execute, and where every part of it came from. It
-spawns nothing.
+spawns nothing — not the command, and not the shell. The shell is consulted for its name only,
+because that is what decides how arguments are quoted.
 
 ```
 $ cd packages/legacy && rune inspect test
-  script      test
-  defined     rune.config.ts:12                    root
-  overridden  packages/legacy/rune.config.ts:4     + --maxWorkers=1
-  command     vitest run --reporter=dot --maxWorkers=1
-  shell       /bin/sh -c
-  cwd         /repo/packages/legacy
-  env         NODE_ENV=test              from .env.test
-              RUNE_SCRIPT_NAME=test
-              RUNE_ROOT=/repo
-              RUNE_PACKAGE_DIR=/repo/packages/legacy
-  ignored     DATABASE_URL               .env.test, already set
-  path        + packages/legacy/node_modules/.bin
-              + node_modules/.bin
+test
+
+command      vitest run --reporter=dot --maxWorkers=1
+directory    packages/legacy
+environment  NODE_ENV=test
+ignored      `DATABASE_URL` from `.env.test` was ignored: the process environment already sets it
+
+resolved through
+  rune.config.ts                  test  runs `vitest run --reporter=dot`
+  packages/legacy/rune.config.ts  test  appends `--maxWorkers=1`
 ```
 
-## Fields
+The report opens with the script name, then a labelled block, then the chain that produced it.
 
-| Field | Content |
+## The labelled block
+
+A label appears only when the script gave it something to say. A script with no environment of its
+own prints no `environment` line at all, so the lines that are there are the decisions the config
+made.
+
+| Label | Content |
 | --- | --- |
-| `script` | The name asked for |
-| `defined` | The config and line holding the base definition |
-| `overridden` | Each config that extends it, with what it added |
-| `command` | The final string, after inheritance, per-OS selection and argument appending |
-| `shell` | The program and arguments the command is handed to |
-| `cwd` | The resolved working directory |
-| `env` | Every variable Rune adds or changes, with its source |
+| `command` | The final string, after inheritance, per-OS selection and argument quoting |
+| `runs` | A serial group's members, in order, joined by arrows |
+| `all at once` | A parallel group's members |
+| `succeeds if` | What the group's success policy means, said rather than named |
+| `on failure` | Printed when the group sets `continueOnError` |
+| `runs first` | The script's `dependsOn` chain |
+| `lifecycle` | One line per declared timeout, retry, kill signal and kill timeout |
+| `directory` | The working directory, relative to the config root |
+| `environment` | Every variable the config adds or changes |
 | `ignored` | Assignments that did not take effect, and why |
-| `path` | The `.bin` directories prepended, in order |
+
+`environment` is the config's own delta. `PATH` and the `RUNE_` variables are not listed: Rune
+sets them for every script, so printing them would bury the one line that was a choice.
 
 ## Chains
 
-An `extends` chain prints as a line per link, base first:
+Every step that contributed appears under `resolved through`, base first, each naming the config
+it came from and what it put in:
 
 ```
 $ rune inspect test:ci
-  script      test:ci
-  defined     rune.config.ts:8                     root:test
-  extends     rune.config.ts:12                    root:test:coverage  + --coverage
-  extends     rune.config.ts:16                    root:test:ci        + --reporter=junit
-  command     vitest run --reporter=dot --coverage --reporter=junit
+test:ci
+
+command      vitest run --reporter=dot --coverage --reporter=junit
+directory    .
+
+resolved through
+  rune.config.ts  test           runs `vitest run --reporter=dot`
+  rune.config.ts  test:coverage  appends `--coverage`
+  rune.config.ts  test:ci        appends `--reporter=junit`
 ```
 
 ## Groups
 
-For a group, the members are listed with the command each resolves to:
+A group has no command, so it reports its members and how they are run:
 
 ```
 $ rune inspect ci
-  script      ci
-  defined     rune.config.ts:22                    root
-  kind        serial, stops at the first failure
-  members     build     tsc --build
-              test      vitest run --reporter=dot
-              lint      biome check .
+ci
+
+runs         build → test → lint
+directory    .
+
+resolved through
+  rune.config.ts  ci  runs build, test, lint
 ```
 
-## Arguments
+```
+$ rune inspect dev
+dev
 
-```bash
-rune inspect test -- --watch
+all at once  dev:api, dev:web
+succeeds if  the member that finishes first succeeds
+directory    .
+
+resolved through
+  rune.config.ts  dev  runs dev:api, dev:web at once
 ```
 
-Arguments after `--` are appended and quoted the same way `rune run` would, so the printed command
-is what would run.
+Inspect a member by name to see the command it resolves to.
+
+## Lifecycle
+
+Declared timeouts and retries print as what they do:
+
+```
+$ rune inspect e2e
+e2e
+
+command      playwright test
+lifecycle    ends the whole tree after 600000 ms
+             retries 2 more times on failure, waiting 2^attempt seconds between them
+directory    .
+
+resolved through
+  rune.config.ts  e2e  runs `playwright test`
+```
+
+Defaults are left out. A report that printed `SIGTERM after 5000 ms` for every script would hide
+the one line that was a decision.
+
+## Flags
 
 `--root` inspects the root definition, ignoring package overrides.
+
+`rune inspect` takes no arguments after `--`. Use `rune run` for that.
 
 ## Exit code
 

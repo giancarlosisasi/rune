@@ -18,9 +18,11 @@ is the field reference.
 | --- | --- | --- | --- |
 | `timeout` | `number` | none | Milliseconds before the process tree is terminated |
 | `retries` | `number` | `0` | Extra attempts after a failure |
-| `retryDelay` | `number \| 'exponential'` | `0` | Milliseconds between attempts, or `2^attempt` seconds |
-| `killSignal` | `string` | `'SIGTERM'` | The signal sent first when Rune terminates the script |
+| `retryDelay` | `number \| 'exponential'` | `0` | Milliseconds between attempts, or `2^attempt` seconds. Requires `retries` |
+| `killSignal` | `'SIGHUP' \| 'SIGINT' \| 'SIGQUIT' \| 'SIGTERM' \| 'SIGKILL'` | `'SIGTERM'` | The signal sent first when Rune terminates the script |
 | `killTimeout` | `number` | `5000` | Milliseconds before escalating to `SIGKILL` |
+
+Every duration is a whole number of milliseconds.
 
 ## timeout
 
@@ -66,6 +68,16 @@ With `retryDelay: 'exponential'` the wait is `2^attempt` seconds: 2 s before the
 Anything observing the script sees only the final attempt: the reported exit code, a group's
 failure handling, and a success policy. A script that fails twice and then succeeds is one success,
 not three events.
+
+`retryDelay` without `retries` is refused when the config loads, because a wait before an attempt
+that will never happen is a mistake rather than a preference:
+
+```
+script `a` sets `retryDelay` but no `retries`
+
+`retryDelay` is the wait between attempts, and without `retries` there is no second attempt
+for it to come before.
+```
 
 ## timeout with retries
 

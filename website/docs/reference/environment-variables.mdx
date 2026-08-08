@@ -30,9 +30,8 @@ build: {
 | `npm_config_script_shell` | The shell every command is spawned through. Arrives automatically when Rune runs from a package-manager script |
 | `PATH` | The base that `node_modules/.bin` directories are prepended to |
 | `CI` | Decides `rune.isCI` in a config. Any value other than empty, `0` or `false` counts as CI |
-| `NO_COLOR` | Any value turns off colour in Rune's own output |
-| `FORCE_COLOR` | Forwarded to piped members of a parallel group, so their colour survives the pipe |
-| `RUNE_LOG` | Turns on Rune's internal tracing. `RUNE_LOG=debug` is the useful level |
+| `NO_COLOR` | Any value turns off colour in Rune's own prefixes |
+| `FORCE_COLOR` | Forwarded to piped members of a parallel group, so their colour survives the pipe. A value already set wins |
 | `RUNE_BINARY_PATH` | Points the npm wrapper at a specific native binary instead of resolving one |
 
 ## Read by a config
@@ -53,7 +52,7 @@ Names beginning with `RUNE_` cannot be set from an `envFile` or from a script's 
 attempt is ignored and reported:
 
 ```
-warning: RUNE_ROOT in the env map was ignored — RUNE_ is reserved
+warning: `RUNE_ROOT` from this script's `env` was ignored: `RUNE_` is reserved for rune's own variables
 ```
 
 The reason is that a script reading `RUNE_ROOT` has to be able to trust it. A config that could

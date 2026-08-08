@@ -6,20 +6,30 @@ description: 'How a parallel group labels each line, handles partial lines and c
 # Prefixed output
 
 A single script and a serial group inherit the terminal, so their output is untouched. A parallel
-group pipes its members so each line can say which script wrote it.
+group of two or more members pipes them so each line can say which script wrote it.
 
 ```
-[api]  listening on http://localhost:4000
-[web]  vite v6.0.1  ready in 412 ms
-[web]  ➜ Local:   http://localhost:5173/
-[api]  GET /health 200 1.2 ms
+[api] listening on http://localhost:4000
+[web] vite v6.0.1  ready in 412 ms
+[web] ➜ Local:   http://localhost:5173/
+[api] GET /health 200 1.2 ms
 ```
 
 ## The prefix
 
-The prefix is the member's script name, padded to the width of the longest name in the group, in a
-colour that stays the same for the whole run. Colours come from the cool half of the spectrum only,
-because green, amber and red mean pass, warn and fail everywhere else in Rune's output.
+The prefix is the member's script name in square brackets, followed by one space, in a colour that
+stays the same for the whole run. Names are not padded to a common width, so a line starts as soon
+as the bracket closes.
+
+Six colours cycle in the order members are declared: cyan, magenta, green, yellow, blue, bright
+magenta. Red is left out, because a red prefix on an ordinary line reads as a failure the script
+never reported.
+
+## A group of one is not prefixed
+
+A group with exactly one member runs that member with the terminal inherited, exactly as a single
+script would. There is nothing to disambiguate, and prefixing it would silently degrade a config
+that happens to wrap one script in a group.
 
 ## Partial lines
 
@@ -43,19 +53,6 @@ that honour it keep their colour.
 
 A member with `interactive: true` is not piped at all. It inherits the terminal, so it is not
 prefixed and it detects colour for itself.
-
-## Grouped output
-
-`--group-output` buffers each member and prints it in one block when it finishes, instead of
-interleaving.
-
-```bash
-rune run ci --group-output
-```
-
-Useful in CI logs, where interleaved output from four members is hard to read after the fact.
-Buffering means a member's output appears only after it exits, so it is the wrong choice while
-watching a long run.
 
 ## Broken pipes
 

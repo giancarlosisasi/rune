@@ -4,8 +4,8 @@ import { pluginLlms } from '@rspress/plugin-llms';
 import { pluginSitemap } from '@rspress/plugin-sitemap';
 
 const SITE_URL = 'https://rune.gio-labs.com';
-const AUTHOR_URL = 'https://github.com/giancarlosio';
-const REPO_URL = 'https://github.com/giancarlosio/rune';
+const AUTHOR_URL = 'https://github.com/giancarlosisasi';
+const REPO_URL = 'https://github.com/giancarlosisasi/rune';
 const SOCIAL_IMAGE = `${SITE_URL}/og.png`;
 const SOCIAL_IMAGE_ALT = 'The runic letter raido above the wordmark rune, on a dark field.';
 

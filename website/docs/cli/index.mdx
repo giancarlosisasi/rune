@@ -40,17 +40,19 @@ Options:
 
 ## Streams
 
-Standard output belongs to the script. Every Rune diagnostic, warning and echo goes to standard
-error, on every platform, so `rune run build > artifact.txt` captures the build's bytes and nothing
-of Rune's.
+Standard output belongs to the script. Every Rune diagnostic and warning goes to standard error, on
+every platform, so `rune run build > artifact.txt` captures the build's bytes and nothing of Rune's.
+
+Two commands have text as their product and write it to standard output: `rune list` and
+`rune inspect`. `rune init` writes a file, and reports the path it wrote on standard error.
 
 ## Colour
 
-Colour is used when standard error is a terminal that supports it. `NO_COLOR` set to any value
-turns it off. Rune never relies on colour alone: every state carries a glyph and a word as well.
+Rune's own messages are plain text. The one place it uses colour is the prefix in front of a
+parallel group's output, and `NO_COLOR` set to any value turns that off. See
+[Prefixed output](/reference/output).
 
 ## Environment variables
 
-Every flag has a matching `RUNE_` environment variable, so a setting can live in a shell profile or
-a CI job definition instead of on the command line. See
-[Environment variables](/reference/environment-variables).
+Rune reads `npm_config_script_shell`, `NO_COLOR`, `FORCE_COLOR` and `CI`, and sets three `RUNE_`
+variables for every script it runs. See [Environment variables](/reference/environment-variables).
