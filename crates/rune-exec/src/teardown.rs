@@ -308,7 +308,10 @@ mod tests {
 
   /// A process id no run will ever hand out, for asking what happens to something that
   /// has already gone.
-  const GONE: u32 = u32::MAX - 1;
+  ///
+  /// It has to stay inside `i32`: POSIX process ids are signed, and a value above that
+  /// range is refused as malformed before any question about the process is asked.
+  const GONE: u32 = i32::MAX as u32;
 
   #[test]
   fn this_process_is_running() {

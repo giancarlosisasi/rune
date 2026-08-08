@@ -1,0 +1,14 @@
+rune could not find its binary for darwin arm64.
+
+`@giancarlosio/rune-darwin-arm64` ships with rune as an optional dependency, and is not installed.
+
+an interrupted install, or one made with optional dependencies turned off, leaves exactly
+this behind.
+
+repair it with:
+
+  rm -rf node_modules package-lock.json && npm install
+
+it looked for:
+  @giancarlosio/rune-darwin-arm64/bin/rune
+  @giancarlosio/rune-darwin-x64/bin/rune

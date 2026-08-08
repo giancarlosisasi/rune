@@ -1,0 +1,4 @@
+# This file carries the carriage return a checkout on Windows leaves behind, and it is the
+# fixture that proves rune trims it. Any line-ending conversion, in either direction, would
+# delete the defect the test exists to catch.
+crates/rune-cli/tests/fixtures/version-crlf.txt -text

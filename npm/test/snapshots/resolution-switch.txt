@@ -1,0 +1,32 @@
+[
+  {
+    "platform": "win32-x64",
+    "package": "@giancarlosio/rune-win32-x64",
+    "binary": "rune.exe"
+  },
+  {
+    "platform": "win32-arm64",
+    "package": "@giancarlosio/rune-win32-arm64",
+    "binary": "rune.exe"
+  },
+  {
+    "platform": "darwin-x64",
+    "package": "@giancarlosio/rune-darwin-x64",
+    "binary": "rune"
+  },
+  {
+    "platform": "darwin-arm64",
+    "package": "@giancarlosio/rune-darwin-arm64",
+    "binary": "rune"
+  },
+  {
+    "platform": "linux-x64",
+    "package": "@giancarlosio/rune-linux-x64",
+    "binary": "rune"
+  },
+  {
+    "platform": "linux-arm64",
+    "package": "@giancarlosio/rune-linux-arm64",
+    "binary": "rune"
+  }
+]

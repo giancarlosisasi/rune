@@ -1,0 +1,13 @@
+{
+  "name": "rune-npm",
+  "version": "0.0.0",
+  "private": true,
+  "description": "How the rune binary is packaged for npm: the published meta package, the platform packages, and their tests.",
+  "scripts": {
+    "test": "node --test \"test/**/*.test.js\"",
+    "dist": "node scripts/dist.js"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.0"
+  }
+}

@@ -1,0 +1,43 @@
+{
+  "name": "@giancarlosio/rune",
+  "version": "0.1.0",
+  "description": "Centralized script runner for JS/TS monorepos",
+  "keywords": [
+    "monorepo",
+    "scripts",
+    "task-runner",
+    "npm-scripts",
+    "cli"
+  ],
+  "homepage": "https://github.com/giancarlosisasi/rune",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/giancarlosisasi/rune.git"
+  },
+  "license": "MIT",
+  "bin": {
+    "rune": "./bin/rune"
+  },
+  "main": "./index.js",
+  "types": "./index.d.ts",
+  "files": [
+    "bin",
+    "lib",
+    "index.js",
+    "index.d.ts"
+  ],
+  "scripts": {
+    "postversion": "node ../scripts/bump-version.js"
+  },
+  "optionalDependencies": {
+    "@giancarlosio/rune-win32-x64": "0.1.0",
+    "@giancarlosio/rune-win32-arm64": "0.1.0",
+    "@giancarlosio/rune-darwin-x64": "0.1.0",
+    "@giancarlosio/rune-darwin-arm64": "0.1.0",
+    "@giancarlosio/rune-linux-x64": "0.1.0",
+    "@giancarlosio/rune-linux-arm64": "0.1.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

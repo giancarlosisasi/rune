@@ -1,0 +1,100 @@
+#!/usr/bin/env node
+'use strict';
+
+// The wrapper npm links as `rune`. It finds the native binary, runs it, and gets out of
+// the way — everything a user sees from here on is the binary's own output.
+//
+// Two things it must not get wrong. Arguments reach the binary untouched, because a
+// shim that re-quotes is a shim that breaks on the first argument holding a space. And
+// when the binary dies from a signal, this process re-raises that same signal on itself
+// rather than exiting with a number: exiting 143 reports an ordinary exit of 143, while
+// re-raising reports a signal death, and a shell or a supervisor telling the two apart
+// is misled by the first.
+
+const { spawn } = require('node:child_process');
+const fs = require('node:fs');
+const path = require('node:path');
+
+const { diagnose } = require('../lib/diagnose');
+const inspect = require('../lib/inspect');
+const { resolveBinary } = require('../lib/resolve');
+
+main();
+
+function main() {
+  const resolution = resolveBinary({
+    platform: process.platform,
+    arch: process.arch,
+    env: process.env,
+    resolve: (specifier) => require.resolve(specifier),
+    exists: (candidate) => fs.existsSync(candidate),
+  });
+
+  if (resolution.failure) {
+    process.stderr.write(diagnose(observe(resolution.failure)));
+    process.exit(1);
+  }
+
+  if (resolution.warning) {
+    process.stderr.write(`warning: ${resolution.warning}\n`);
+  }
+
+  run(resolution.path);
+}
+
+// Everything the message needs that only the machine can answer. Gathered here, once,
+// and only on the path where the message is about to be printed.
+function observe(failure) {
+  const context = {
+    ...failure,
+    hostPlatform: process.platform,
+    packageManager: inspect.detectPackageManager(process.env),
+  };
+
+  if (failure.kind !== 'missing') {
+    return context;
+  }
+
+  const from = path.dirname(__dirname);
+  const lockfile = inspect.findLockfile(from);
+
+  return {
+    ...context,
+    foreign: inspect.foreignPackages(from),
+    lockfile: lockfile && {
+      ...lockfile,
+      mentionsPackage: inspect.lockfileMentions(lockfile.path, failure.package),
+    },
+  };
+}
+
+function run(binary) {
+  const child = spawn(binary, process.argv.slice(2), { stdio: 'inherit' });
+
+  // The terminal delivers an interrupt to the whole foreground group, so the binary has
+  // it already and is shutting down; killing it from here would cut that short. A
+  // termination signal reaches only this process, so it is passed on.
+  const ignoreInterrupt = () => {};
+  const forwardTermination = () => child.kill('SIGTERM');
+  process.on('SIGINT', ignoreInterrupt);
+  process.on('SIGTERM', forwardTermination);
+
+  child.on('error', (error) => {
+    process.stderr.write(`rune could not run ${binary}: ${error.message}\n`);
+    process.exit(1);
+  });
+
+  child.on('close', (code, signal) => {
+    // Node keeps the default disposition of a signal only while nothing is listening for
+    // it, so the handlers come off before the signal is raised again.
+    process.off('SIGINT', ignoreInterrupt);
+    process.off('SIGTERM', forwardTermination);
+
+    if (signal) {
+      process.kill(process.pid, signal);
+      return;
+    }
+
+    process.exit(code ?? 1);
+  });
+}

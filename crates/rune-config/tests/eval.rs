@@ -81,6 +81,40 @@ fn type_only_npm_import_is_erased_and_the_config_loads() {
   assert_eq!(config["scripts"]["dev"]["command"], "vite");
 }
 
+/// The authoring style every guide and every published type is written for: `defineConfig`
+/// comes from the package rune publishes, and the binary answers that import itself.
+#[test]
+fn define_config_is_supplied_by_the_binary_rather_than_by_node_modules() {
+  let dir = fixture(&[(
+    "rune.config.ts",
+    "import { defineConfig } from '@giancarlosio/rune';\n\
+     export default defineConfig({ scripts: { dev: { command: 'vite' } } });\n",
+  )]);
+
+  let config = evaluate_config(&dir.path().join("rune.config.ts"), &Environment::default())
+    .expect("config evaluates")
+    .value;
+
+  assert_eq!(config["scripts"]["dev"]["command"], "vite");
+}
+
+/// A config that reaches for anything else in that package is told so, rather than being
+/// handed an undefined value that fails somewhere further along.
+#[test]
+fn the_supplied_module_offers_define_config_and_nothing_else() {
+  let dir = fixture(&[(
+    "rune.config.ts",
+    "import { somethingElse } from '@giancarlosio/rune';\n\
+     export default { scripts: { dev: { command: somethingElse } } };\n",
+  )]);
+
+  let error = evaluate_config(&dir.path().join("rune.config.ts"), &Environment::default())
+    .unwrap_err()
+    .to_string();
+
+  assert!(error.contains("somethingElse"), "{error}");
+}
+
 /// Test 2.3 — naming only the missing file leaves the user hunting for who imported it.
 #[test]
 fn missing_relative_import_names_the_file_and_its_importer() {

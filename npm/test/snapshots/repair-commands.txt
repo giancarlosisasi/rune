@@ -1,0 +1,12 @@
+npm 11 on linux: rm -rf node_modules package-lock.json && npm install
+npm 11 on win32: Remove-Item -Recurse -Force node_modules, package-lock.json && npm install
+pnpm 11 on linux: pnpm install --force
+pnpm 11 on win32: pnpm install --force
+bun 11 on linux: bun install --force
+bun 11 on win32: bun install --force
+yarn 1 on linux: yarn install --check-files
+yarn 1 on win32: yarn install --check-files
+yarn 4 on linux: rm -rf node_modules && yarn install
+yarn 4 on win32: Remove-Item -Recurse -Force node_modules && yarn install
+unknown on linux: rm -rf node_modules package-lock.json && npm install
+unknown on win32: Remove-Item -Recurse -Force node_modules, package-lock.json && npm install

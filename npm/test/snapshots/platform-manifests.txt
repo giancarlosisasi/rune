@@ -1,0 +1,128 @@
+[
+  {
+    "name": "@giancarlosio/rune-win32-x64",
+    "version": "1.2.3",
+    "description": "The rune binary for win32 x64.",
+    "homepage": "https://github.com/giancarlosisasi/rune",
+    "repository": {
+      "type": "git",
+      "url": "git+https://github.com/giancarlosisasi/rune.git"
+    },
+    "license": "MIT",
+    "os": [
+      "win32"
+    ],
+    "cpu": [
+      "x64"
+    ],
+    "preferUnplugged": true,
+    "publishConfig": {
+      "access": "public"
+    }
+  },
+  {
+    "name": "@giancarlosio/rune-win32-arm64",
+    "version": "1.2.3",
+    "description": "The rune binary for win32 arm64.",
+    "homepage": "https://github.com/giancarlosisasi/rune",
+    "repository": {
+      "type": "git",
+      "url": "git+https://github.com/giancarlosisasi/rune.git"
+    },
+    "license": "MIT",
+    "os": [
+      "win32"
+    ],
+    "cpu": [
+      "arm64"
+    ],
+    "preferUnplugged": true,
+    "publishConfig": {
+      "access": "public"
+    }
+  },
+  {
+    "name": "@giancarlosio/rune-darwin-x64",
+    "version": "1.2.3",
+    "description": "The rune binary for darwin x64.",
+    "homepage": "https://github.com/giancarlosisasi/rune",
+    "repository": {
+      "type": "git",
+      "url": "git+https://github.com/giancarlosisasi/rune.git"
+    },
+    "license": "MIT",
+    "os": [
+      "darwin"
+    ],
+    "cpu": [
+      "x64"
+    ],
+    "preferUnplugged": true,
+    "publishConfig": {
+      "access": "public"
+    }
+  },
+  {
+    "name": "@giancarlosio/rune-darwin-arm64",
+    "version": "1.2.3",
+    "description": "The rune binary for darwin arm64.",
+    "homepage": "https://github.com/giancarlosisasi/rune",
+    "repository": {
+      "type": "git",
+      "url": "git+https://github.com/giancarlosisasi/rune.git"
+    },
+    "license": "MIT",
+    "os": [
+      "darwin"
+    ],
+    "cpu": [
+      "arm64"
+    ],
+    "preferUnplugged": true,
+    "publishConfig": {
+      "access": "public"
+    }
+  },
+  {
+    "name": "@giancarlosio/rune-linux-x64",
+    "version": "1.2.3",
+    "description": "The rune binary for linux x64.",
+    "homepage": "https://github.com/giancarlosisasi/rune",
+    "repository": {
+      "type": "git",
+      "url": "git+https://github.com/giancarlosisasi/rune.git"
+    },
+    "license": "MIT",
+    "os": [
+      "linux"
+    ],
+    "cpu": [
+      "x64"
+    ],
+    "preferUnplugged": true,
+    "publishConfig": {
+      "access": "public"
+    }
+  },
+  {
+    "name": "@giancarlosio/rune-linux-arm64",
+    "version": "1.2.3",
+    "description": "The rune binary for linux arm64.",
+    "homepage": "https://github.com/giancarlosisasi/rune",
+    "repository": {
+      "type": "git",
+      "url": "git+https://github.com/giancarlosisasi/rune.git"
+    },
+    "license": "MIT",
+    "os": [
+      "linux"
+    ],
+    "cpu": [
+      "arm64"
+    ],
+    "preferUnplugged": true,
+    "publishConfig": {
+      "access": "public"
+    }
+  }
+]

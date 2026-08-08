@@ -8,9 +8,14 @@ mod inspect;
 mod list;
 mod run;
 mod script;
+mod version;
 
 #[derive(Parser)]
-#[command(name = "rune", version, about = "Centralized script runner for JS/TS monorepos")]
+#[command(
+  name = "rune",
+  version = version::VERSION,
+  about = "Centralized script runner for JS/TS monorepos"
+)]
 struct Cli {
   #[command(subcommand)]
   command: Command,
@@ -103,15 +108,9 @@ mod tests {
   }
 
   #[test]
-  fn version_is_three_numbers() {
+  fn the_version_clap_reports_is_the_one_embedded_from_the_version_file() {
     let cmd = Cli::command();
-    let version = cmd.get_version().expect("version is set in #[command]");
 
-    let parts: Vec<&str> = version.split('.').collect();
-    assert_eq!(parts.len(), 3, "expected MAJOR.MINOR.PATCH, got {version}");
-
-    for part in parts {
-      assert!(part.parse::<u32>().is_ok(), "segment `{part}` is not a number");
-    }
+    assert_eq!(cmd.get_version(), Some(crate::version::VERSION));
   }
 }

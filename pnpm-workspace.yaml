@@ -1,2 +1,5 @@
 packages:
   - website
+  # The packaging tests only. The meta package under `npm/rune` is deliberately not a
+  # workspace package: a local copy of what rune publishes would shadow the real one.
+  - npm

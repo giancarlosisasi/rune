@@ -3,6 +3,9 @@
 
 mod harness;
 
+use std::fs;
+use std::path::Path;
+
 use harness::Test;
 
 /// Test 1.1 — and the harness's first exercise. A failure here is as likely to be the
@@ -10,6 +13,18 @@ use harness::Test;
 #[test]
 fn version_is_printed_on_stdout() {
   Test::new().args(["--version"]).stdout_regex(r"^rune \d+\.\d+\.\d+\n$").status(0).run();
+}
+
+/// Test 6a.13 — the printed version is the first line of the file the packaging step
+/// rewrites on every bump, so the binary and the package it ships in cannot disagree.
+#[test]
+fn version_is_the_first_line_of_the_file_the_packaging_step_writes() {
+  let file = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../version.txt");
+  let recorded = fs::read_to_string(&file).expect("version.txt is readable");
+  // `lines` drops a carriage return of its own, which is the same trim the binary does.
+  let expected = recorded.lines().next().expect("version.txt has a first line");
+
+  Test::new().args(["--version"]).stdout(&format!("rune {expected}\n")).status(0).run();
 }
 
 /// Test 1.2 — no golden snapshot: the CLI surface still grows in five later changes, so

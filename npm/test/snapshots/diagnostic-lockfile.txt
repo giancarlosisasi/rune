@@ -1,0 +1,14 @@
+rune could not find its binary for linux x64.
+
+`@giancarlosio/rune-linux-x64` is missing from this install, and from /repo/pnpm-lock.yaml.
+
+package managers have a long-standing defect that drops the optional dependencies of
+other platforms from a lockfile written on one machine (npm/cli#4828). An install made
+from that lockfile then has no binary for this platform to install.
+
+repair it with:
+
+  pnpm install --force
+
+it looked for:
+  @giancarlosio/rune-linux-x64/bin/rune

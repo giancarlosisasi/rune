@@ -14,6 +14,7 @@ use rquickjs::module::Declared;
 use rquickjs::{CatchResultExt, CaughtError, Context, Ctx, Module, Runtime, Value};
 use thiserror::Error;
 
+use crate::builtin;
 use crate::env::{Environment, ObservedEnvironment};
 use crate::globals::install;
 use crate::resolve::{ResolveError, canonical, resolve};
@@ -66,6 +67,11 @@ impl Resolver for PathResolver {
     name: &str,
     _attributes: Option<ImportAttributes<'_>>,
   ) -> rquickjs::Result<String> {
+    // The one specifier that is its own key: there is no file behind it to canonicalize.
+    if builtin::is_builtin(name) {
+      return Ok(name.to_owned());
+    }
+
     match resolve(Path::new(base), name) {
       Ok(path) => Ok(path.to_string_lossy().into_owned()),
       Err(error) => {
@@ -88,6 +94,10 @@ impl Loader for StrippingLoader {
     name: &str,
     _attributes: Option<ImportAttributes<'js>>,
   ) -> rquickjs::Result<Module<'js, Declared>> {
+    if builtin::is_builtin(name) {
+      return Module::declare(ctx.clone(), name, builtin::SOURCE);
+    }
+
     let path = Path::new(name);
     match read_and_strip(path) {
       Ok(code) => Module::declare(ctx.clone(), name, code),

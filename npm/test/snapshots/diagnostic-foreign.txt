@@ -1,0 +1,15 @@
+rune could not find its binary for win32 x64.
+
+`@giancarlosio/rune-win32-x64` is missing, but the binary of another platform is installed:
+  @giancarlosio/rune-linux-x64
+
+one node_modules directory is being shared by two systems. A folder mounted into WSL or
+into a container, or a dependency directory copied into an image built somewhere else,
+both end this way. Install from the machine that runs rune.
+
+repair it with:
+
+  Remove-Item -Recurse -Force node_modules, package-lock.json && npm install
+
+it looked for:
+  @giancarlosio/rune-win32-x64/bin/rune.exe

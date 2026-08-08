@@ -1,0 +1,6 @@
+RUNE_BINARY_PATH names a binary that is not there:
+
+  /home/dev/rune/target/debug/rune
+
+rune will not fall back to the installed release while that variable is set. A stale
+path has to be reported, not worked around: unset it, or point it at a binary that exists.
