@@ -5,7 +5,7 @@
 // deserializer are compared. A field either side learns about on its own shows up here as
 // a failure rather than as a user's bug report.
 
-import { defineConfig } from '@giancarlosio/rune';
+import { defineConfig } from '@gio-labs/rune';
 
 export default defineConfig({
   scripts: {

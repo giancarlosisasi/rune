@@ -83,8 +83,11 @@ function main() {
         continue;
       }
 
-      const directory = placeholder(work, name);
-      runNpm(['publish', '--access', 'public', '--tag', 'bootstrap'], { cwd: directory });
+      // Publishing by folder, not by moving into it. npm reads the registry credentials
+      // from where it runs, and a temporary directory holds no `.npmrc` of any kind — a
+      // token placed in the repository would be ignored and the publish would fail as
+      // anonymous.
+      runNpm(['publish', placeholder(work, name), '--access', 'public', '--tag', 'bootstrap']);
       process.stdout.write(`created ${name}@${PLACEHOLDER}\n`);
     }
   } finally {

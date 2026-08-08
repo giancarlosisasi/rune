@@ -5,7 +5,7 @@
 // "this file does not compile" assertion passes just as happily on a typo in the fixture,
 // which is why each case is marked individually and each one is written on a single line.
 
-import type { Script } from '@giancarlosio/rune';
+import type { Script } from '@gio-labs/rune';
 
 // @ts-expect-error a script runs a command of its own or extends another one, never both
 export const commandAndExtends: Script = { command: 'tsc -b', extends: 'build' };

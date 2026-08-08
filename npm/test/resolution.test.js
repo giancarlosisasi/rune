@@ -64,8 +64,8 @@ test('an x64 host has no sibling to fall back to', () => {
   });
 
   assert.equal(resolution.failure.kind, 'missing');
-  assert.equal(resolution.failure.package, '@giancarlosio/rune-linux-x64');
-  assert.deepEqual(resolution.failure.tried, ['@giancarlosio/rune-linux-x64/bin/rune']);
+  assert.equal(resolution.failure.package, '@gio-labs/rune-linux-x64');
+  assert.deepEqual(resolution.failure.tried, ['@gio-labs/rune-linux-x64/bin/rune']);
 });
 
 test('an arm64 host that has neither package reports both attempts', () => {
@@ -78,8 +78,8 @@ test('an arm64 host that has neither package reports both attempts', () => {
   });
 
   assert.deepEqual(resolution.failure.tried, [
-    '@giancarlosio/rune-darwin-arm64/bin/rune',
-    '@giancarlosio/rune-darwin-x64/bin/rune',
+    '@gio-labs/rune-darwin-arm64/bin/rune',
+    '@gio-labs/rune-darwin-x64/bin/rune',
   ]);
 });
 

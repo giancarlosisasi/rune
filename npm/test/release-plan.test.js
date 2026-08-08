@@ -93,7 +93,7 @@ test('6b.4 — a package that was pinned but never built fails the release', () 
 });
 
 test('6b.4 — a package that was built but never pinned fails the release', () => {
-  const extra = [...built(), { name: '@giancarlosio/rune-sunos-x64', version: VERSION }];
+  const extra = [...built(), { name: '@gio-labs/rune-sunos-x64', version: VERSION }];
 
   const problems = validatePins({ manifest: meta, built: extra, version: VERSION });
 

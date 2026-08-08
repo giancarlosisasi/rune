@@ -11,7 +11,7 @@
 
 const platforms = require('../rune/lib/platforms');
 
-const META = '@giancarlosio/rune';
+const META = '@gio-labs/rune';
 
 // Platform packages first, the meta package last.
 //

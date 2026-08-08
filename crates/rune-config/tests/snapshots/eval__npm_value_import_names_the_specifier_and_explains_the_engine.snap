@@ -10,5 +10,5 @@ rune evaluates this config with an embedded JavaScript engine, so npm packages a
 what does work:
   - `import type { ... } from "lodash"` — type-only imports are erased before evaluation
   - a relative import of a file in this repository, such as `./scripts/helpers.ts`
-  - `import { defineConfig } from "@giancarlosio/rune"` — the one package rune supplies itself
+  - `import { defineConfig } from "@gio-labs/rune"` — the one package rune supplies itself
   - the `rune` global: `rune.env`, `rune.platform`, `rune.isCI`

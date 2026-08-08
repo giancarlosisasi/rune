@@ -60,9 +60,9 @@ function foreignPackages(startDirectory) {
 
   let directory = startDirectory;
   for (let step = 0; step < WALK_LIMIT; step += 1) {
-    const scope = path.join(directory, 'node_modules', '@giancarlosio');
+    const scope = path.join(directory, 'node_modules', '@gio-labs');
     for (const entry of readDirectory(scope)) {
-      installed.add(`@giancarlosio/${entry}`);
+      installed.add(`@gio-labs/${entry}`);
     }
 
     const parent = path.dirname(directory);

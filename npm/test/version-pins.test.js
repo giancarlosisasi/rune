@@ -30,7 +30,7 @@ test('a bump pins every platform package at exactly the new version', () => {
 test('a hand-edited pin does not survive a bump', () => {
   const drifted = {
     ...meta,
-    optionalDependencies: { '@giancarlosio/rune-linux-x64': '^0.0.1', 'left-pad': '1.0.0' },
+    optionalDependencies: { '@gio-labs/rune-linux-x64': '^0.0.1', 'left-pad': '1.0.0' },
   };
 
   assert.deepEqual(withDerivedPins(drifted, '2.0.0'), withDerivedPins(meta, '2.0.0'));
@@ -64,7 +64,7 @@ test('a bump writes the version file the binary embeds', (t) => {
   assert.equal(JSON.parse(fs.readFileSync(manifestPath, 'utf8')).version, '3.1.4');
   assert.equal(
     JSON.parse(fs.readFileSync(manifestPath, 'utf8')).optionalDependencies[
-      '@giancarlosio/rune-darwin-arm64'
+      '@gio-labs/rune-darwin-arm64'
     ],
     '3.1.4',
   );

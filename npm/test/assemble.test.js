@@ -77,7 +77,7 @@ test('what was packed is written down beside the tarballs', (t) => {
   assert.equal(record.version, version());
   assert.deepEqual(
     record.packed.map((one) => one.name),
-    [entry.package, '@giancarlosio/rune'],
+    [entry.package, '@gio-labs/rune'],
     'the meta package is recorded last',
   );
   for (const one of record.packed) {

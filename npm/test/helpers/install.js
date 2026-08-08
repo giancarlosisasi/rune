@@ -22,7 +22,7 @@ function currentPlatform() {
 // script the binary should run is the first argument the test passes.
 function fakeInstall({ present = [currentPlatform()] } = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'rune-install-'));
-  const scope = path.join(root, 'node_modules', '@giancarlosio');
+  const scope = path.join(root, 'node_modules', '@gio-labs');
 
   fs.mkdirSync(scope, { recursive: true });
   fs.cpSync(META_SOURCE, path.join(scope, 'rune'), { recursive: true });

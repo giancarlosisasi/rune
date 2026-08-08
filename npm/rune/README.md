@@ -5,11 +5,11 @@ One place for the scripts of a whole monorepo. Every package runs them with
 `package.json`.
 
 ```bash
-pnpm add -D @giancarlosio/rune
+pnpm add -D @gio-labs/rune
 ```
 
 ```ts title="rune.config.ts"
-import { defineConfig } from '@giancarlosio/rune';
+import { defineConfig } from '@gio-labs/rune';
 
 export default defineConfig({
   scripts: {

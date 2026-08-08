@@ -5,8 +5,8 @@
     "builder": "cargo",
     "binary": "rune.exe",
     "packages": [
-      "@giancarlosio/rune-win32-x64",
-      "@giancarlosio/rune-win32-arm64"
+      "@gio-labs/rune-win32-x64",
+      "@gio-labs/rune-win32-arm64"
     ]
   },
   {
@@ -15,7 +15,7 @@
     "builder": "cargo",
     "binary": "rune",
     "packages": [
-      "@giancarlosio/rune-darwin-x64"
+      "@gio-labs/rune-darwin-x64"
     ]
   },
   {
@@ -24,7 +24,7 @@
     "builder": "cargo",
     "binary": "rune",
     "packages": [
-      "@giancarlosio/rune-darwin-arm64"
+      "@gio-labs/rune-darwin-arm64"
     ]
   },
   {
@@ -33,7 +33,7 @@
     "builder": "cargo-zigbuild",
     "binary": "rune",
     "packages": [
-      "@giancarlosio/rune-linux-x64"
+      "@gio-labs/rune-linux-x64"
     ]
   },
   {
@@ -42,7 +42,7 @@
     "builder": "cargo-zigbuild",
     "binary": "rune",
     "packages": [
-      "@giancarlosio/rune-linux-arm64"
+      "@gio-labs/rune-linux-arm64"
     ]
   }
 ]

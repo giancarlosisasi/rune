@@ -63,7 +63,7 @@ fn npm_value_import_names_the_specifier_and_explains_the_engine() {
 fn type_only_npm_import_is_erased_and_the_config_loads() {
   let dir = fixture(&[(
     "rune.config.ts",
-    "import type { Script } from '@giancarlosio/rune';\n\
+    "import type { Script } from '@gio-labs/rune';\n\
      const dev: Script = { command: 'vite' };\n\
      export default { scripts: { dev } };\n",
   )]);
@@ -81,7 +81,7 @@ fn type_only_npm_import_is_erased_and_the_config_loads() {
 fn define_config_is_supplied_by_the_binary_rather_than_by_node_modules() {
   let dir = fixture(&[(
     "rune.config.ts",
-    "import { defineConfig } from '@giancarlosio/rune';\n\
+    "import { defineConfig } from '@gio-labs/rune';\n\
      export default defineConfig({ scripts: { dev: { command: 'vite' } } });\n",
   )]);
 
@@ -98,7 +98,7 @@ fn define_config_is_supplied_by_the_binary_rather_than_by_node_modules() {
 fn the_supplied_module_offers_define_config_and_nothing_else() {
   let dir = fixture(&[(
     "rune.config.ts",
-    "import { somethingElse } from '@giancarlosio/rune';\n\
+    "import { somethingElse } from '@gio-labs/rune';\n\
      export default { scripts: { dev: { command: somethingElse } } };\n",
   )]);
 

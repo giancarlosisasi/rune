@@ -60,7 +60,7 @@ const BOOTSTRAP: &str = r#"
   const AVAILABLE = [
     "  - `rune.env`, `rune.platform`, `rune.isCI`",
     "  - relative imports of other files in this repository, such as `./scripts/helpers.ts`",
-    "  - `import { defineConfig } from \"@giancarlosio/rune\"` — the one package rune supplies itself",
+    "  - `import { defineConfig } from \"@gio-labs/rune\"` — the one package rune supplies itself",
     "  - `import type` from any npm package — type-only imports are erased before evaluation",
   ].join("\n");
 

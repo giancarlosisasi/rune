@@ -11,7 +11,7 @@ Install once, at the workspace root. One native binary per platform resolves thr
 dependencies, so nothing is compiled and no postinstall script runs.
 
 ```bash
-pnpm add -D @giancarlosio/rune    # npm install --save-dev / yarn add -D / bun add -d
+pnpm add -D @gio-labs/rune    # npm install --save-dev / yarn add -D / bun add -d
 ```
 
 Check the binary:
@@ -26,12 +26,12 @@ pnpm rune --version
 
 | System | Architecture | Package | Binary |
 | --- | --- | --- | --- |
-| Windows | x64 | `@giancarlosio/rune-win32-x64` | native |
-| Windows | arm64 | `@giancarlosio/rune-win32-arm64` | ships the x64 binary, run under emulation |
-| macOS | x64 | `@giancarlosio/rune-darwin-x64` | native |
-| macOS | arm64 | `@giancarlosio/rune-darwin-arm64` | native |
-| Linux | x64 | `@giancarlosio/rune-linux-x64` | native |
-| Linux | arm64 | `@giancarlosio/rune-linux-arm64` | native |
+| Windows | x64 | `@gio-labs/rune-win32-x64` | native |
+| Windows | arm64 | `@gio-labs/rune-win32-arm64` | ships the x64 binary, run under emulation |
+| macOS | x64 | `@gio-labs/rune-darwin-x64` | native |
+| macOS | arm64 | `@gio-labs/rune-darwin-arm64` | native |
+| Linux | x64 | `@gio-labs/rune-linux-x64` | native |
+| Linux | arm64 | `@gio-labs/rune-linux-arm64` | native |
 
 <!-- platforms:end -->
 
@@ -50,7 +50,7 @@ pnpm rune init
 
 ```ts
 // rune.config.ts
-import { defineConfig } from '@giancarlosio/rune';
+import { defineConfig } from '@gio-labs/rune';
 
 export default defineConfig({
   scripts: {

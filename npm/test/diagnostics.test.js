@@ -26,9 +26,9 @@ test('a lockfile that omits the package is named, cited and repaired', () => {
       kind: 'missing',
       platform: 'linux',
       arch: 'x64',
-      package: '@giancarlosio/rune-linux-x64',
+      package: '@gio-labs/rune-linux-x64',
       hostPlatform: 'linux',
-      tried: ['@giancarlosio/rune-linux-x64/bin/rune'],
+      tried: ['@gio-labs/rune-linux-x64/bin/rune'],
       lockfile: { path: '/repo/pnpm-lock.yaml', manager: 'pnpm', mentionsPackage: false },
       packageManager: { name: 'pnpm', major: 11 },
     }),
@@ -42,11 +42,11 @@ test('binaries for another platform explain the boundary they came across', () =
       kind: 'missing',
       platform: 'win32',
       arch: 'x64',
-      package: '@giancarlosio/rune-win32-x64',
+      package: '@gio-labs/rune-win32-x64',
       hostPlatform: 'win32',
-      tried: ['@giancarlosio/rune-win32-x64/bin/rune.exe'],
+      tried: ['@gio-labs/rune-win32-x64/bin/rune.exe'],
       lockfile: { path: 'C:\\repo\\package-lock.json', manager: 'npm', mentionsPackage: true },
-      foreign: ['@giancarlosio/rune-linux-x64'],
+      foreign: ['@gio-labs/rune-linux-x64'],
       packageManager: { name: 'npm', major: 11 },
     }),
   );
@@ -59,11 +59,11 @@ test('a plain missing package still gets a repair command', () => {
       kind: 'missing',
       platform: 'darwin',
       arch: 'arm64',
-      package: '@giancarlosio/rune-darwin-arm64',
+      package: '@gio-labs/rune-darwin-arm64',
       hostPlatform: 'darwin',
       tried: [
-        '@giancarlosio/rune-darwin-arm64/bin/rune',
-        '@giancarlosio/rune-darwin-x64/bin/rune',
+        '@gio-labs/rune-darwin-arm64/bin/rune',
+        '@gio-labs/rune-darwin-x64/bin/rune',
       ],
       foreign: [],
       packageManager: undefined,
@@ -94,7 +94,7 @@ test('the repair command is the one for the manager in use', () => {
         kind: 'missing',
         platform: hostPlatform,
         arch: 'x64',
-        package: '@giancarlosio/rune-linux-x64',
+        package: '@gio-labs/rune-linux-x64',
         hostPlatform,
         packageManager,
       });
@@ -118,28 +118,28 @@ test('the package manager is read from the environment it sets', () => {
 
 test('the lockfile is found by walking up out of node_modules', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'rune-lock-'));
-  const nested = path.join(root, 'node_modules', '@giancarlosio', 'rune');
+  const nested = path.join(root, 'node_modules', '@gio-labs', 'rune');
   fs.mkdirSync(nested, { recursive: true });
-  fs.writeFileSync(path.join(root, 'yarn.lock'), '"@giancarlosio/rune@^0.1.0":\n');
+  fs.writeFileSync(path.join(root, 'yarn.lock'), '"@gio-labs/rune@^0.1.0":\n');
 
   const found = inspect.findLockfile(nested);
 
   assert.equal(found.manager, 'yarn');
   assert.equal(found.path, path.join(root, 'yarn.lock'));
-  assert.equal(inspect.lockfileMentions(found.path, '@giancarlosio/rune-linux-x64'), false);
-  assert.equal(inspect.lockfileMentions(found.path, '@giancarlosio/rune'), true);
+  assert.equal(inspect.lockfileMentions(found.path, '@gio-labs/rune-linux-x64'), false);
+  assert.equal(inspect.lockfileMentions(found.path, '@gio-labs/rune'), true);
 
   fs.rmSync(root, { recursive: true, force: true });
 });
 
 test('platform packages for another system are found where they are', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'rune-foreign-'));
-  const scope = path.join(root, 'node_modules', '@giancarlosio');
+  const scope = path.join(root, 'node_modules', '@gio-labs');
   fs.mkdirSync(path.join(scope, 'rune-linux-arm64'), { recursive: true });
   fs.mkdirSync(path.join(scope, 'rune'), { recursive: true });
 
   assert.deepEqual(inspect.foreignPackages(path.join(scope, 'rune')), [
-    '@giancarlosio/rune-linux-arm64',
+    '@gio-labs/rune-linux-arm64',
   ]);
 
   fs.rmSync(root, { recursive: true, force: true });
