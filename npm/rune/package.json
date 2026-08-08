@@ -1,6 +1,6 @@
 {
   "name": "@gio-labs/rune",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Centralized script runner for JS/TS monorepos",
   "keywords": [
     "monorepo",
@@ -30,12 +30,12 @@
     "postversion": "node ../scripts/bump-version.js"
   },
   "optionalDependencies": {
-    "@gio-labs/rune-win32-x64": "0.1.0",
-    "@gio-labs/rune-win32-arm64": "0.1.0",
-    "@gio-labs/rune-darwin-x64": "0.1.0",
-    "@gio-labs/rune-darwin-arm64": "0.1.0",
-    "@gio-labs/rune-linux-x64": "0.1.0",
-    "@gio-labs/rune-linux-arm64": "0.1.0"
+    "@gio-labs/rune-win32-x64": "0.1.1",
+    "@gio-labs/rune-win32-arm64": "0.1.1",
+    "@gio-labs/rune-darwin-x64": "0.1.1",
+    "@gio-labs/rune-darwin-arm64": "0.1.1",
+    "@gio-labs/rune-linux-x64": "0.1.1",
+    "@gio-labs/rune-linux-arm64": "0.1.1"
   },
   "publishConfig": {
     "access": "public"
