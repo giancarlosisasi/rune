@@ -6,7 +6,7 @@
 
 mod harness;
 
-use harness::{FIXTURE_SUFFIX, Test, testkit};
+use harness::{FIXTURE_SUFFIX, Test, assert_same_path, canonical, testkit};
 
 /// The fake tool every fixture that needs a real child calls. Always `.exe`, on every
 /// operating system.
@@ -96,10 +96,11 @@ fn the_child_environment_layers_correctly() {
 
   assert_eq!(report["env"]["SHARED"], "from-script", "the script's env must win");
   assert_eq!(report["env"]["RUNE_SCRIPT_NAME"], "probe");
-  assert_eq!(report["env"]["RUNE_ROOT"].as_str(), root.to_str());
-  assert_eq!(
+  assert_same_path(report["env"]["RUNE_ROOT"].as_str(), &root, "RUNE_ROOT");
+  assert_same_path(
     report["env"]["RUNE_PACKAGE_DIR"].as_str(),
-    root.join("packages").join("foo").to_str()
+    &root.join("packages").join("foo"),
+    "RUNE_PACKAGE_DIR",
   );
 }
 
@@ -279,12 +280,6 @@ fn cwd_of(stdout: &[u8]) -> std::path::PathBuf {
   let report = report_of(stdout);
   let cwd = report["cwd"].as_str().expect("the report carries a working directory");
   canonical(std::path::Path::new(cwd))
-}
-
-/// Temporary directories are reached through symlinks on macOS, so the two sides of an
-/// equality have to be spelled the same way before they can be compared.
-fn canonical(path: &std::path::Path) -> std::path::PathBuf {
-  std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
 }
 
 /// The fixture binary has to be built for any of this to mean anything.

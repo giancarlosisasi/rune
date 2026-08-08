@@ -1,4 +1,11 @@
-# This file carries the carriage return a checkout on Windows leaves behind, and it is the
-# fixture that proves rune trims it. Any line-ending conversion, in either direction, would
-# delete the defect the test exists to catch.
+# Golden files are compared byte for byte, and a checkout that rewrites line endings makes
+# every one of them fail on that machine alone. Git for Windows turns `core.autocrlf` on by
+# default, and the GitHub Windows runners keep it on, so the working tree is pinned to LF
+# here rather than left to each machine's configuration.
+* text=auto eol=lf
+
+# The exception, and it has to come last to win: this file carries the carriage return a
+# checkout on Windows leaves behind, and it is the fixture that proves rune trims it. Any
+# line-ending conversion, in either direction, would delete the defect the test exists to
+# catch.
 crates/rune-cli/tests/fixtures/version-crlf.txt -text

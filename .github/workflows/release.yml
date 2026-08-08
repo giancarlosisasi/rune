@@ -35,7 +35,7 @@ jobs:
       libc: ${{ steps.read.outputs.libc }}
       install: ${{ steps.read.outputs.install }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       # Every platform, target triple and runner named in this workflow comes from here.
       - id: read
@@ -57,9 +57,9 @@ jobs:
       matrix:
         include: ${{ fromJSON(needs.plan.outputs.build) }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           key: ${{ matrix.target }}
       - run: rustup target add ${{ matrix.target }}
@@ -68,11 +68,11 @@ jobs:
       # bundles against musl without the linker patches a plain rustup target needs;
       # the native builds have no such problem and would only be slowed down by it.
       - if: matrix.builder == 'cargo-zigbuild'
-        uses: mlugg/setup-zig@v2
+        uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
         with:
           version: 0.16.0
       - if: matrix.builder == 'cargo-zigbuild'
-        uses: taiki-e/install-action@v2
+        uses: taiki-e/install-action@6c6fd71fe4fb72c3697d269963d0e15df8adedad # v2.85.10
         with:
           tool: cargo-zigbuild
 
@@ -84,7 +84,7 @@ jobs:
           mkdir -p staged
           cp "target/${{ matrix.target }}/release/${{ matrix.binary }}" staged/
 
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: binary-${{ matrix.target }}
           path: staged/${{ matrix.binary }}
@@ -99,7 +99,7 @@ jobs:
       matrix:
         include: ${{ fromJSON(needs.plan.outputs.libc) }}
     steps:
-      - uses: actions/download-artifact@v8
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: binary-${{ matrix.target }}
           path: linux
@@ -107,7 +107,7 @@ jobs:
       # The arm64 binaries run under emulation. Asking only about the version keeps that
       # cheap, and the version is the whole question: a binary that starts and reports
       # itself has resolved every symbol it needs.
-      - uses: docker/setup-qemu-action@v4
+      - uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 # v4.2.0
         if: matrix.platform != 'linux/amd64'
 
       - name: run the release binary under ${{ matrix.libc }}
@@ -125,12 +125,12 @@ jobs:
     needs: [plan, build]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 24
 
-      - uses: actions/download-artifact@v8
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           pattern: binary-*
           path: artifacts
@@ -139,7 +139,7 @@ jobs:
       # then checks that the meta package's pins name exactly what was built.
       - run: node npm/scripts/assemble-release.js artifacts
 
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: tarballs
           path: npm/dist/tarballs
@@ -154,12 +154,12 @@ jobs:
       matrix:
         runner: ${{ fromJSON(needs.plan.outputs.install) }}
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 24
 
-      - uses: actions/download-artifact@v8
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: tarballs
           path: tarballs
@@ -182,8 +182,8 @@ jobs:
       # archive download when it is not. Installing it keeps the fast path.
       - run: apk add --no-cache git
 
-      - uses: actions/checkout@v7
-      - uses: actions/download-artifact@v8
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: tarballs
           path: tarballs
@@ -198,6 +198,10 @@ jobs:
     name: publish
     needs: [plan, libc, install, install-musl, benchmark]
     runs-on: ubuntu-latest
+    # The last point at which a release can still be stopped. Everything before this is
+    # reversible; a published version is not, and npm does not unpublish. Configure this
+    # environment with a required reviewer and the job waits for a person.
+    environment: release
     permissions:
       # Trusted publishing: npm gets a short-lived credential issued for this workflow
       # run. No long-lived registry token exists in this repository at all, and a token
@@ -205,8 +209,8 @@ jobs:
       id-token: write
       contents: read
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 24
           registry-url: https://registry.npmjs.org
@@ -215,7 +219,7 @@ jobs:
       # tool changes underneath a release.
       - run: npm install --global npm@11.11.0
 
-      - uses: actions/download-artifact@v8
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: tarballs
           path: tarballs
@@ -231,15 +235,15 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
 
-      - uses: taiki-e/install-action@v2
+      - uses: taiki-e/install-action@6c6fd71fe4fb72c3697d269963d0e15df8adedad # v2.85.10
         with:
           tool: git-cliff
 
-      - uses: actions/download-artifact@v8
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           pattern: binary-*
           path: artifacts

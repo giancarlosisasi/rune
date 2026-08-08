@@ -38,23 +38,28 @@ function measure(binary, cwd) {
   // what gets timed, and the result says nothing about rune.
   const run = spawnSync(
     'hyperfine',
-    ['-N', '--warmup', '20', '--runs', '200', '--export-json', report, `${binary} list`],
+    ['-N', '--warmup', '20', '--runs', '200', '--export-json', report, `"${binary}" list`],
     { cwd, encoding: 'utf8', stdio: ['ignore', 'inherit', 'inherit'] },
   );
-  assert.equal(run.status, 0, 'hyperfine did not finish');
+  assert.equal(run.status, 0, `hyperfine did not finish: ${run.error ?? run.status}`);
 
   const [result] = JSON.parse(fs.readFileSync(report, 'utf8')).results;
   return { mean: result.mean * 1000, stddev: result.stddev * 1000 };
 }
 
-function benchmark(binary) {
+function benchmark(binaryPath) {
+  // Everything below runs in a throwaway project, so a path relative to the repository
+  // would resolve against the wrong directory — or, worse, against nothing.
+  const binary = path.resolve(binaryPath);
+  assert.ok(fs.existsSync(binary), `no binary at ${binary}`);
+
   const cwd = project();
 
   try {
     // One run outside the measurement, so what is timed is the cache hit and never the
     // one cold evaluation that fills it.
     const warm = spawnSync(binary, ['list'], { cwd, encoding: 'utf8' });
-    assert.equal(warm.status, 0, `rune list failed before the benchmark:\n${warm.stderr}`);
+    assert.equal(warm.status, 0, `rune list failed before the benchmark:\n${warm.error ?? warm.stderr}`);
 
     const { mean, stddev } = measure(binary, cwd);
     const verdict = mean <= BUDGET_MS ? 'within' : 'over';

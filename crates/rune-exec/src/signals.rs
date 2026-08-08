@@ -132,6 +132,7 @@ mod unix {
   use std::io;
   use std::sync::atomic::{AtomicI32, Ordering};
 
+  use nix::fcntl::{FcntlArg, FdFlag, fcntl};
   use nix::libc;
   use nix::sys::signal::{SaFlags, SigAction, SigHandler, SigSet, Signal, sigaction};
   use nix::unistd;
@@ -146,11 +147,18 @@ mod unix {
   const WATCHED: [Signal; 4] = [Signal::SIGINT, Signal::SIGTERM, Signal::SIGHUP, Signal::SIGQUIT];
 
   pub fn install() {
-    let Ok((read, write)) = nix::unistd::pipe2(nix::fcntl::OFlag::O_CLOEXEC) else {
+    // macOS has no `pipe2`, so close-on-exec is set on the two ends afterwards instead of
+    // atomically at creation. There is no window to worry about: this runs before rune
+    // has spawned anything that could inherit them.
+    let Ok((read, write)) = unistd::pipe() else {
       // Without the pipe rune still runs; it just cannot tell a caller it was
       // interrupted. Failing the run over that would be worse.
       return;
     };
+
+    for end in [&read, &write] {
+      let _ = fcntl(end, FcntlArg::F_SETFD(FdFlag::FD_CLOEXEC));
+    }
 
     // The write end lives as long as the process, because the handler may run at any
     // moment until rune exits.
