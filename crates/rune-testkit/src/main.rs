@@ -43,6 +43,7 @@ fn main() -> ExitCode {
     Some("after") => after(&rest),
     Some("colorize") => colorize(&rest),
     Some("fail-once") => fail_once(rest.first().copied()),
+    Some("hang-once") => hang_once(rest.first().copied()),
     Some("touch") => touch(rest.first().copied()),
     other => usage(other),
   }
@@ -311,6 +312,29 @@ fn fail_once(state_file: Option<&str>) -> ExitCode {
   ExitCode::FAILURE
 }
 
+/// Blocks forever the first time and succeeds afterwards, with the attempt recorded on
+/// disk so the state survives the process. The fixture for a timeout that is retried.
+fn hang_once(state_file: Option<&str>) -> ExitCode {
+  let Some(state_file) = state_file else {
+    return fail("hang-once needs a path to keep its state in");
+  };
+
+  let path = PathBuf::from(state_file);
+  if path.exists() {
+    return print_line(READY);
+  }
+
+  if let Err(error) = std::fs::write(&path, "attempted\n") {
+    return fail(&format!("cannot write {state_file}: {error}"));
+  }
+
+  if print_line(READY) == ExitCode::FAILURE {
+    return ExitCode::FAILURE;
+  }
+
+  block_forever()
+}
+
 /// Leaves a file behind and exits.
 ///
 /// The evidence that a process ran, readable after it is gone. A command that must never
@@ -332,7 +356,7 @@ fn usage(unknown: Option<&str>) -> ExitCode {
   fail(&format!(
     "unknown subcommand `{named}`\n\nknown: report-env, ready-then-wait, exit-code, \
      trap-term, spawn-grandchild, spawn-child, isatty, emit, chatty, chatty-hold, mark, \
-     await, colorize, fail-once, touch"
+     await, colorize, fail-once, hang-once, touch"
   ))
 }
 

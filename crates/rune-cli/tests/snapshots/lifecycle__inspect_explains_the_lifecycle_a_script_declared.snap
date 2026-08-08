@@ -1,0 +1,14 @@
+---
+source: crates/rune-cli/tests/lifecycle.rs
+description: a script declaring a timeout and retries
+expression: "String::from_utf8_lossy(&output.stdout).replace(\"\\r\\n\", \"\\n\")"
+---
+e2e
+
+command      playwright test
+lifecycle    ends the whole tree after 600000 ms
+             retries 2 more times on failure, waiting 2^attempt seconds between them
+directory    .
+
+resolved through
+  rune.config.ts  e2e  runs `playwright test`

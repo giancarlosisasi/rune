@@ -17,6 +17,7 @@
 pub mod bin_paths;
 pub mod environment;
 mod group;
+mod lifecycle;
 pub mod quote;
 pub mod shell;
 mod signals;
@@ -33,6 +34,7 @@ use thiserror::Error;
 use crate::environment::FileLayer;
 
 pub use crate::group::{Member, SuccessPolicy, Task};
+pub use crate::lifecycle::{Kill, KillSignal, Lifecycle, RetryDelay, TIMEOUT_CODE};
 
 /// A script, resolved down to everything spawning it needs.
 pub struct ExecRequest<'a> {
@@ -57,6 +59,29 @@ pub struct ExecRequest<'a> {
   /// Outside a group this changes nothing — a lone script already has the terminal. It is
   /// how a watch interface survives being one member of a `dev` group.
   pub interactive: bool,
+  /// How long the script may run, how often it is retried, and how its tree is ended.
+  pub lifecycle: Lifecycle,
+}
+
+impl ExecRequest<'_> {
+  /// Whether this script's children belong in a process group of their own.
+  ///
+  /// A declared timeout is a promise to end the whole tree, and on POSIX a tree can only
+  /// be reached as a process group. `interactive` opts out of it: a process outside the
+  /// terminal's foreground group is stopped the moment it reads the terminal, which would
+  /// freeze exactly the watch modes and prompts that keeping the terminal exists for.
+  #[cfg(unix)]
+  pub(crate) fn wants_own_group(&self) -> bool {
+    self.lifecycle.timeout.is_some() && !self.interactive
+  }
+
+  /// A job object holds a whole tree wherever its processes sit, and a console event
+  /// reaches all of them, so there is nothing to move and nothing rune has to reach.
+  #[cfg(windows)]
+  #[expect(clippy::unused_self, reason = "the shape is the platform interface")]
+  pub(crate) fn wants_own_group(&self) -> bool {
+    false
+  }
 }
 
 #[derive(Debug, Error)]

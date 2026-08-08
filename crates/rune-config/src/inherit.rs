@@ -15,7 +15,7 @@ use std::path::{Path, PathBuf};
 use thiserror::Error;
 
 use crate::envfile::{self, EnvFile, EnvFileError};
-use crate::schema::{Command, Config, Kind, Script, SuccessPolicy};
+use crate::schema::{Command, Config, Kind, Lifecycle, Script, SuccessPolicy};
 use crate::suggest::{closest, did_you_mean};
 
 /// One config taking part in resolution.
@@ -83,6 +83,9 @@ pub struct Resolved<'a> {
   pub cwd: Option<&'a str>,
   /// The script keeps rune's own terminal even as one member of a group.
   pub interactive: bool,
+  /// The lifecycle options the chain declared, each one taken from the last script that
+  /// named it.
+  pub lifecycle: Lifecycle,
   pub env: BTreeMap<String, String>,
   /// The dotenv files the chain declares, nearest to the script first.
   ///
@@ -238,6 +241,7 @@ fn merge<'a>(layers: &'a [Layer], walked: &[Step<'a>]) -> Resolved<'a> {
   let mut description = None;
   let mut cwd = None;
   let mut interactive = false;
+  let mut lifecycle = Lifecycle::default();
   let mut env: BTreeMap<String, String> = BTreeMap::new();
   let mut env_files = Vec::new();
   let mut chain = Vec::with_capacity(walked.len());
@@ -275,6 +279,7 @@ fn merge<'a>(layers: &'a [Layer], walked: &[Step<'a>]) -> Resolved<'a> {
     if let Some(declared) = script.interactive {
       interactive = declared;
     }
+    lifecycle.absorb(script.lifecycle);
     // Per key, never whole-map: a package adding one variable must not discard the
     // base's others.
     env.extend(script.env.iter().map(|(key, value)| (key.clone(), value.clone())));
@@ -301,6 +306,7 @@ fn merge<'a>(layers: &'a [Layer], walked: &[Step<'a>]) -> Resolved<'a> {
     description,
     cwd,
     interactive,
+    lifecycle,
     env,
     env_files,
     chain,

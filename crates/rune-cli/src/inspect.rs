@@ -16,7 +16,7 @@ use rune_config::env::PLATFORM;
 use rune_config::inherit::{Link, Resolved, Runs, Scope};
 use rune_config::load::Loaded;
 use rune_config::paths::relative_to;
-use rune_config::schema::{Command, SuccessPolicy};
+use rune_config::schema::{Command, KillSignal, Lifecycle, RetryDelay, SuccessPolicy};
 use rune_exec::environment::{self, Descriptor, Layering};
 use rune_exec::quote::command_line;
 use rune_exec::shell::{SHELL_VARIABLE, Shell};
@@ -64,6 +64,13 @@ fn render(name: &str, resolved: &Resolved<'_>, loaded: &Loaded) -> String {
 
   if !resolved.depends_on.is_empty() {
     let _ = writeln!(report, "{:<LABEL$}  {}", "runs first", resolved.depends_on.join(" → "));
+  }
+
+  // A retry that nothing announces is how a deterministic failure hides for a month. The
+  // configured options are printed as what they do, not as the words that set them.
+  for (position, line) in lifecycle(&resolved.lifecycle).iter().enumerate() {
+    let label = if position == 0 { "lifecycle" } else { "" };
+    let _ = writeln!(report, "{label:<LABEL$}  {line}");
   }
 
   let _ = writeln!(
@@ -115,6 +122,53 @@ fn contribution(link: &Link<'_>, resolved: &Resolved<'_>) -> String {
     Runs::Command(command) => format!("runs `{}`", command.select(PLATFORM)),
     Runs::Serial { members, .. } => format!("runs {}", members.join(", ")),
     Runs::Parallel { members, .. } => format!("runs {} at once", members.join(", ")),
+  }
+}
+
+/// The lifecycle options a script declared, one line each, and nothing for the ones it
+/// left alone.
+///
+/// Defaults are deliberately absent: a report that listed `SIGTERM after 5000 ms` for
+/// every script would bury the one line that was a decision under four that were not.
+fn lifecycle(declared: &Lifecycle) -> Vec<String> {
+  let mut lines = Vec::new();
+
+  if let Some(timeout) = declared.timeout {
+    lines.push(format!("ends the whole tree after {} ms", timeout.as_millis()));
+  }
+
+  if let Some(retries) = declared.retries {
+    let wait = match declared.retry_delay {
+      None => String::new(),
+      Some(RetryDelay::Fixed(delay)) => format!(", waiting {} ms between them", delay.as_millis()),
+      Some(RetryDelay::Exponential) => ", waiting 2^attempt seconds between them".to_owned(),
+    };
+    lines.push(format!("retries {retries} more {} on failure{wait}", plural(retries, "time")));
+  }
+
+  if let Some(signal) = declared.kill_signal {
+    lines.push(format!("ends with {}", named(signal)));
+  }
+
+  if let Some(timeout) = declared.kill_timeout {
+    lines.push(format!("waits {} ms before SIGKILL", timeout.as_millis()));
+  }
+
+  lines
+}
+
+fn plural(count: u32, word: &str) -> String {
+  if count == 1 { word.to_owned() } else { format!("{word}s") }
+}
+
+/// The signal spelled the way the config writes it.
+fn named(signal: KillSignal) -> &'static str {
+  match signal {
+    KillSignal::Hup => "SIGHUP",
+    KillSignal::Int => "SIGINT",
+    KillSignal::Quit => "SIGQUIT",
+    KillSignal::Term => "SIGTERM",
+    KillSignal::Kill => "SIGKILL",
   }
 }
 

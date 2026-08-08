@@ -1,0 +1,11 @@
+---
+source: crates/rune-config/tests/schema.rs
+description: retries on a parallel group
+expression: error
+---
+[TMP]/rune.config.ts is not a valid rune config
+
+script `ci` sets `retries` on a `parallel` group
+
+`retries` describes how one process is run, and a group is not a process — it names the
+scripts it runs. Put it on the members it should apply to.

@@ -74,6 +74,55 @@ fn a_script_with_both_command_and_extends_is_rejected() {
   });
 }
 
+/// A config is evaluated as JavaScript, where every number is a double: `1000` comes back
+/// from the engine as `1000.0`. A schema that only read integers would reject every
+/// duration a user can write, and no test built from a JSON literal would notice.
+#[test]
+fn durations_and_counts_survive_the_javascript_engine() {
+  use std::time::Duration;
+
+  use rune_config::inherit::Scope;
+  use rune_config::schema::RetryDelay;
+
+  let dir = repo(
+    "export default {\n  scripts: {\n    \
+     e2e: { command: 'playwright test', timeout: 1500, retries: 2, retryDelay: 250, killTimeout: 2500 },\n  \
+     },\n};\n",
+  );
+
+  let loaded = load(dir.path(), &Environment::default()).expect("the config loads");
+  let resolved = loaded.resolve("e2e", Scope::Nearest).expect("resolves").expect("defined");
+
+  assert_eq!(resolved.lifecycle.timeout, Some(Duration::from_millis(1500)));
+  assert_eq!(resolved.lifecycle.retries, Some(2));
+  assert_eq!(resolved.lifecycle.retry_delay, Some(RetryDelay::Fixed(Duration::from_millis(250))));
+  assert_eq!(resolved.lifecycle.kill_timeout, Some(Duration::from_millis(2500)));
+}
+
+/// Test 5d.7 — a lifecycle option on a group.
+///
+/// A group is not a process, so `retries` on one has at least two readings and nothing in
+/// the config chooses between them. Refusing it is only half the answer: the message has
+/// to say where the option does belong, or the user's next edit is a guess.
+#[test]
+fn a_lifecycle_option_on_a_group_is_rejected_and_points_at_the_members() {
+  let error = rejection(
+    "export default {\n  scripts: {\n    \
+     unit: { command: 'vitest run' },\n    \
+     e2e: { command: 'playwright test' },\n    \
+     ci: { parallel: ['unit', 'e2e'], retries: 2 },\n  \
+     },\n};\n",
+  );
+
+  assert!(error.contains("`ci`"), "the message must name the script: {error}");
+  assert!(error.contains("`retries`"), "the message must name the option: {error}");
+  assert!(error.contains("members"), "the message must say where the option belongs: {error}");
+
+  insta::with_settings!({ description => "retries on a parallel group" }, {
+    insta::assert_snapshot!(error);
+  });
+}
+
 /// Test 4b.6 — `appendArgs` on a script that extends nothing.
 ///
 /// The arguments would have nothing to be appended to. Silently ignoring them is the

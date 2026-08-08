@@ -48,8 +48,11 @@ write a diagnostic there and produce no output on stdout. npm and `just` accept 
 indistinguishable by code. Rune prints the reason to stderr when it is the one that decided:
 
 ```
-error: `e2e` exceeded its 600000 ms timeout — process tree terminated
+`e2e` exceeded its 600000 ms timeout — its process tree was terminated
 ```
+
+With `retries`, only the final attempt's timeout reaches the exit code. Every timed-out attempt
+still prints its line, so a killed process is never silent.
 
 ## Wide statuses on Windows
 

@@ -15,7 +15,7 @@ use rune_config::compose::Plan;
 use rune_config::env::PLATFORM;
 use rune_config::inherit::{Runs, Scope};
 use rune_config::load::Loaded;
-use rune_config::schema::SuccessPolicy;
+use rune_config::schema::{self, SuccessPolicy};
 use rune_exec::environment::FileLayer;
 use rune_exec::{Completion, ExecRequest, Member, Task};
 
@@ -71,6 +71,7 @@ struct Prepared<'a> {
   env: BTreeMap<String, String>,
   files: Vec<FileLayer<'a>>,
   interactive: bool,
+  lifecycle: rune_exec::Lifecycle,
 }
 
 impl Prepared<'_> {
@@ -85,6 +86,7 @@ impl Prepared<'_> {
       env: &self.env,
       env_files: &self.files,
       interactive: self.interactive,
+      lifecycle: self.lifecycle,
     }
   }
 }
@@ -151,6 +153,40 @@ fn policy_of(policy: SuccessPolicy) -> rune_exec::SuccessPolicy {
   }
 }
 
+/// The lifecycle options a config declared, filled in with what rune does when it said
+/// nothing. The defaults live in rune-exec, so the value a script omits and the value it
+/// never could have written are the same value.
+fn lifecycle_of(declared: schema::Lifecycle) -> rune_exec::Lifecycle {
+  let default = rune_exec::Lifecycle::default();
+
+  rune_exec::Lifecycle {
+    timeout: declared.timeout,
+    retries: declared.retries.unwrap_or(default.retries),
+    retry_delay: declared.retry_delay.map_or(default.retry_delay, delay_of),
+    kill: rune_exec::Kill {
+      signal: declared.kill_signal.map_or(default.kill.signal, signal_of),
+      timeout: declared.kill_timeout.unwrap_or(default.kill.timeout),
+    },
+  }
+}
+
+fn delay_of(delay: schema::RetryDelay) -> rune_exec::RetryDelay {
+  match delay {
+    schema::RetryDelay::Fixed(wait) => rune_exec::RetryDelay::Fixed(wait),
+    schema::RetryDelay::Exponential => rune_exec::RetryDelay::Exponential,
+  }
+}
+
+fn signal_of(signal: schema::KillSignal) -> rune_exec::KillSignal {
+  match signal {
+    schema::KillSignal::Hup => rune_exec::KillSignal::Hup,
+    schema::KillSignal::Int => rune_exec::KillSignal::Int,
+    schema::KillSignal::Quit => rune_exec::KillSignal::Quit,
+    schema::KillSignal::Term => rune_exec::KillSignal::Term,
+    schema::KillSignal::Kill => rune_exec::KillSignal::Kill,
+  }
+}
+
 fn one<'a>(script: &str, run: &Run<'a>) -> Result<Prepared<'a>, String> {
   let resolved = run
     .loaded
@@ -181,6 +217,7 @@ fn one<'a>(script: &str, run: &Run<'a>) -> Result<Prepared<'a>, String> {
     env: resolved.env,
     files,
     interactive,
+    lifecycle: lifecycle_of(resolved.lifecycle),
   })
 }
 

@@ -35,13 +35,18 @@ When the budget elapses, Rune terminates the script's whole process tree through
 escalation path a group uses: `killSignal`, then `SIGKILL` after `killTimeout`. On Windows the
 job object is terminated, which takes the tree with it.
 
-Rune then exits **124**, matching GNU `timeout`, and prints the reason:
+Rune then exits **124**, matching GNU `timeout`, and prints the reason on stderr:
 
 ```
-error: `e2e` exceeded its 600000 ms timeout — process tree terminated
+`e2e` exceeded its 600000 ms timeout — its process tree was terminated
 ```
 
 A script that finishes inside its budget is unaffected. No early termination, no altered code.
+
+On macOS and Linux a script that declares a timeout runs in a process group of its own, because that
+is the only way to reach its grandchildren. Rune forwards the terminal's interrupt to it, so Ctrl+C
+still ends it. A script with `interactive: true` keeps the terminal instead, and its timeout then
+reaches the process Rune started rather than the whole tree.
 
 ## retries
 
@@ -96,8 +101,9 @@ Rune sends `SIGKILL`.
 Setting `killSignal: 'SIGKILL'` skips the timer, because there is nothing to escalate to. A process
 that had already exited is never an error.
 
-On Windows there are no POSIX signals. `killSignal` selects between a polite console event and
-terminating the job object, and `killTimeout` is the interval between them.
+On Windows there are no POSIX signals, and a job object is terminated or it is not. Rune ends the
+whole tree at once there, so `killSignal` and `killTimeout` are accepted — a config has to load on
+every machine — and have nothing to change. Both take effect on macOS and Linux.
 
 ## What these do not cover
 

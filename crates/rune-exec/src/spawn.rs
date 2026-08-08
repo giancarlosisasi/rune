@@ -13,6 +13,7 @@ use rune_out::color::{COLOR_VARIABLE, ColorLevel, forced_color};
 use tokio::process::{Child, Command};
 
 use crate::environment::Descriptor;
+use crate::lifecycle::Kill;
 use crate::shell::{SHELL_VARIABLE, Shell};
 use crate::teardown::Tree;
 use crate::{ExecError, ExecRequest, environment, quote, shell, signals};
@@ -77,12 +78,18 @@ pub fn start(request: &ExecRequest<'_>, wiring: Wiring) -> Result<Spawned, ExecE
   // different spellings depending on which of them is about to read the line.
   let command_line = quote::command_line(request.command, request.arguments, shell.kind);
 
+  // A piped child is torn down as a unit because its siblings may fail; a timeout-bearing
+  // child is torn down as a unit because it promised to end within a budget. Same need,
+  // same placement.
+  let own_group = matches!(wiring, Wiring::Piped(_)) || request.wants_own_group();
+
   let mut command = Command::from(shell.command(&command_line));
   command.current_dir(&directory).env_clear().envs(layering.environment.iter());
-  wire(&mut command, wiring);
+  wire(&mut command, wiring, own_group);
 
-  let (child, tree) =
-    signals::spawn(&mut command, |child| attach(child, wiring)).map_err(|error| {
+  let kill = request.lifecycle.kill;
+  let (child, tree) = signals::spawn(&mut command, |child| attach(child, own_group, kill))
+    .map_err(|error| {
       let shell = shell.program.display().to_string();
       if error.kind() == io::ErrorKind::NotFound {
         ExecError::ShellNotFound { shell }
@@ -97,21 +104,24 @@ pub fn start(request: &ExecRequest<'_>, wiring: Wiring) -> Result<Spawned, ExecE
 }
 
 #[cfg(unix)]
-fn wire(command: &mut Command, wiring: Wiring) {
-  match wiring {
-    Wiring::Inherited => {}
-    Wiring::Piped(_) => {
-      pipe_stdio(command);
-      // Its own process group, so the whole tree can be torn down as a unit. Never for an
-      // inherited child: a process outside the terminal's foreground group is stopped by
-      // `SIGTTIN` the moment it reads the terminal.
-      crate::teardown::into_own_process_group(command.as_std_mut());
-    }
+fn wire(command: &mut Command, wiring: Wiring, own_group: bool) {
+  if matches!(wiring, Wiring::Piped(_)) {
+    pipe_stdio(command);
+  }
+
+  // A process group of its own, so the whole tree can be torn down as a unit. The cost is
+  // paid by whoever asked for it: a process outside the terminal's foreground group is
+  // stopped by `SIGTTIN` the moment it reads the terminal, which is why a script keeping
+  // the terminal never lands here.
+  if own_group {
+    crate::teardown::into_own_process_group(command.as_std_mut());
   }
 }
 
 #[cfg(windows)]
-fn wire(command: &mut Command, wiring: Wiring) {
+fn wire(command: &mut Command, wiring: Wiring, _own_group: bool) {
+  // Job objects reach the whole tree whatever the stdio, so there is no placement to
+  // decide here.
   if matches!(wiring, Wiring::Piped(_)) {
     pipe_stdio(command);
   }
@@ -130,7 +140,7 @@ fn pipe_stdio(command: &mut Command) {
 /// The job handle is held for the lifetime of the run inside the [`Tree`] it returns:
 /// closing it kills the tree, so rune exiting for any reason takes the children with it.
 #[cfg(windows)]
-fn attach(child: &Child, _wiring: Wiring) -> io::Result<Tree> {
+fn attach(child: &Child, _own_group: bool, _kill: Kill) -> io::Result<Tree> {
   use std::rc::Rc;
 
   use crate::teardown::JobObject;
@@ -143,15 +153,16 @@ fn attach(child: &Child, _wiring: Wiring) -> io::Result<Tree> {
 }
 
 #[cfg(unix)]
-fn attach(child: &Child, wiring: Wiring) -> io::Result<Tree> {
+fn attach(child: &Child, own_group: bool, kill: Kill) -> io::Result<Tree> {
   let pid = child.id().unwrap_or_default();
 
-  Ok(match wiring {
-    // An inherited child stays in rune's group, so the terminal's own signal delivery
-    // reaches it and reading the terminal cannot stop it. Signalling that group would
-    // signal rune too, so such a child is only ever reached alone.
-    Wiring::Inherited => Tree::in_runes_group(pid),
-    Wiring::Piped(_) => Tree::own_group(pid),
+  Ok(if own_group {
+    Tree::own_group(pid, kill)
+  } else {
+    // A child that stayed in rune's group has the terminal's own signal delivery, and
+    // reading the terminal cannot stop it. Signalling that group would signal rune too, so
+    // such a child is only ever reached alone.
+    Tree::in_runes_group(pid, kill)
   })
 }
 

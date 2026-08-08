@@ -7,6 +7,7 @@
 //! script is wrong and which word in it is the problem.
 
 use std::collections::BTreeMap;
+use std::time::Duration;
 
 use serde::Deserialize;
 use thiserror::Error;
@@ -34,6 +35,28 @@ const SUCCESS_POLICY: &str = "successPolicy";
 
 /// Keeps one script on rune's own terminal while its siblings are piped.
 const INTERACTIVE: &str = "interactive";
+
+/// How long one run of a script may take before its process tree is terminated.
+const TIMEOUT: &str = "timeout";
+
+/// How many further attempts a failing script gets.
+const RETRIES: &str = "retries";
+
+/// The wait between those attempts.
+const RETRY_DELAY: &str = "retryDelay";
+
+/// What a process tree is asked to end with.
+const KILL_SIGNAL: &str = "killSignal";
+
+/// How long that request is given before the tree is ended for it.
+const KILL_TIMEOUT: &str = "killTimeout";
+
+/// How a script is run rather than what it runs. Every one of these describes a single
+/// process, so they are legal on command and extends scripts and refused on groups.
+const LIFECYCLE: &[&str] = &[TIMEOUT, RETRIES, RETRY_DELAY, KILL_SIGNAL, KILL_TIMEOUT];
+
+/// The value of `retryDelay` that grows the wait instead of repeating it.
+const EXPONENTIAL: &str = "exponential";
 
 /// The keys a per-OS `command` object may hold. The names are Node's `process.platform`
 /// values, so a config reading `rune.platform` and a config using this object spell the
@@ -148,6 +171,47 @@ pub enum SchemaError {
   )]
   InteractiveShape { script: String, found: String },
 
+  #[error(
+    "script `{script}` sets `{option}` on a `{group}` group\n\n\
+     `{option}` describes how one process is run, and a group is not a process — it names \
+     the\nscripts it runs. Put it on the members it should apply to."
+  )]
+  LifecycleOnGroup { script: String, group: String, option: String },
+
+  #[error(
+    "script `{script}` has a `{key}` that is {found}\n\n\
+     `{key}` is a whole number of milliseconds."
+  )]
+  NotADuration { script: String, key: &'static str, found: String },
+
+  #[error(
+    "script `{script}` has a `{RETRIES}` that is {found}\n\n\
+     `{RETRIES}` is how many further attempts a failing script gets, written as a whole \
+     number."
+  )]
+  NotACount { script: String, found: String },
+
+  #[error(
+    "script `{script}` has a `{RETRY_DELAY}` that is {found}\n\n\
+     `{RETRY_DELAY}` is either a whole number of milliseconds waited before every \
+     attempt, or\n`{EXPONENTIAL}`, which waits 2^attempt seconds and so grows with each one."
+  )]
+  RetryDelayValue { script: String, found: String },
+
+  #[error(
+    "script `{script}` sets `{RETRY_DELAY}` but no `{RETRIES}`\n\n\
+     `{RETRY_DELAY}` is the wait between attempts, and without `{RETRIES}` there is no \
+     second attempt\nfor it to come before."
+  )]
+  RetryDelayWithoutRetries { script: String },
+
+  #[error(
+    "script `{script}` has a `{KILL_SIGNAL}` that is {found}\n\n\
+     `{KILL_SIGNAL}` is one of: {}",
+    list(KillSignal::PERMITTED)
+  )]
+  KillSignalValue { script: String, found: String },
+
   #[error("script `{script}`: {source}")]
   Invalid { script: String, source: serde_json::Error },
 }
@@ -228,6 +292,9 @@ pub struct Script {
   ///
   /// `None` means the entry said nothing, so an extending script inherits the answer.
   pub interactive: Option<bool>,
+  /// How the script is run: its timeout, its retries, and how its tree is ended. Never
+  /// carried by a group.
+  pub lifecycle: Lifecycle,
   pub kind: Kind,
 }
 
@@ -267,6 +334,74 @@ impl SuccessPolicy {
       "all" => Some(Self::All),
       "first" => Some(Self::First),
       "last" => Some(Self::Last),
+      _ => None,
+    }
+  }
+}
+
+/// The lifecycle options one script declared.
+///
+/// Every field is optional because absence is meaningful: an extending script inherits
+/// each option it does not declare, and declaring one overrides only that one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Lifecycle {
+  /// How long one attempt may run before its whole process tree is terminated.
+  pub timeout: Option<Duration>,
+  /// How many further attempts a failing script gets.
+  pub retries: Option<u32>,
+  pub retry_delay: Option<RetryDelay>,
+  pub kill_signal: Option<KillSignal>,
+  /// How long a tree is given to act on `kill_signal` before it is ended for it.
+  pub kill_timeout: Option<Duration>,
+}
+
+impl Lifecycle {
+  /// Takes every option `later` declares and keeps the rest — the per-key rule `env`
+  /// follows, so an extending script overrides one option without discarding the others.
+  pub fn absorb(&mut self, later: Self) {
+    self.timeout = later.timeout.or(self.timeout);
+    self.retries = later.retries.or(self.retries);
+    self.retry_delay = later.retry_delay.or(self.retry_delay);
+    self.kill_signal = later.kill_signal.or(self.kill_signal);
+    self.kill_timeout = later.kill_timeout.or(self.kill_timeout);
+  }
+}
+
+/// How long rune waits before running a failing script again.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RetryDelay {
+  /// The same wait before every attempt.
+  Fixed(Duration),
+  /// `2^attempt` seconds, growing with each attempt.
+  Exponential,
+}
+
+/// The signal a script's process tree is asked to end with.
+///
+/// A closed set rather than whatever the platform happens to name: a config written on one
+/// operating system has to load on every other, and `Signal::from_str` would accept a
+/// different set of names on each.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum KillSignal {
+  Hup,
+  Int,
+  Quit,
+  Term,
+  Kill,
+}
+
+impl KillSignal {
+  /// The values a config may write, in the order the error message lists them.
+  pub const PERMITTED: &'static [&'static str] =
+    &["SIGHUP", "SIGINT", "SIGQUIT", "SIGTERM", "SIGKILL"];
+
+  fn parse(value: &str) -> Option<Self> {
+    match value {
+      "SIGHUP" => Some(Self::Hup),
+      "SIGINT" => Some(Self::Int),
+      "SIGQUIT" => Some(Self::Quit),
+      "SIGTERM" => Some(Self::Term),
+      "SIGKILL" => Some(Self::Kill),
       _ => None,
     }
   }
@@ -383,6 +518,14 @@ fn parse_script(name: &str, entry: &serde_json::Value) -> Result<Script, SchemaE
         group: (*group).to_owned(),
       });
     }
+
+    if let Some(option) = LIFECYCLE.iter().find(|key| object.contains_key(**key)) {
+      return Err(SchemaError::LifecycleOnGroup {
+        script: name.to_owned(),
+        group: (*group).to_owned(),
+        option: (*option).to_owned(),
+      });
+    }
   }
 
   if found == Some(&"serial") && object.contains_key(SUCCESS_POLICY) {
@@ -404,14 +547,14 @@ fn parse_script(name: &str, entry: &serde_json::Value) -> Result<Script, SchemaE
     "command" => {
       // Checked before deserializing so the message can name the script. serde's own
       // unknown-field error knows the field but not which entry it came from.
-      reject_unknown_fields(name, object, &allowed_with(&["command", DEPENDS_ON, INTERACTIVE]))?;
+      reject_unknown_fields(name, object, &allowed_to_run(&["command", DEPENDS_ON, INTERACTIVE]))?;
       Kind::Command(parse_command(name, &object["command"])?)
     }
     "extends" => {
       reject_unknown_fields(
         name,
         object,
-        &allowed_with(&["extends", APPEND_ARGS, DEPENDS_ON, INTERACTIVE]),
+        &allowed_to_run(&["extends", APPEND_ARGS, DEPENDS_ON, INTERACTIVE]),
       )?;
       parse_extends(name, object)?
     }
@@ -460,8 +603,122 @@ fn parse_script(name: &str, entry: &serde_json::Value) -> Result<Script, SchemaE
     env_file: common.env_file,
     depends_on,
     interactive,
+    lifecycle: parse_lifecycle(name, object)?,
     kind,
   })
+}
+
+/// The five options that describe how a script is run, or the reason one of them cannot be
+/// read. Only ever reached for a script that runs a command of its own.
+fn parse_lifecycle(
+  script: &str,
+  object: &serde_json::Map<String, serde_json::Value>,
+) -> Result<Lifecycle, SchemaError> {
+  let retries = match object.get(RETRIES) {
+    None => None,
+    Some(value) => {
+      Some(whole(value).and_then(|count| u32::try_from(count).ok()).ok_or_else(|| {
+        SchemaError::NotACount { script: script.to_owned(), found: literal(value) }
+      })?)
+    }
+  };
+
+  let retry_delay = parse_retry_delay(script, object)?;
+  if retry_delay.is_some() && retries.is_none() {
+    return Err(SchemaError::RetryDelayWithoutRetries { script: script.to_owned() });
+  }
+
+  let kill_signal = match object.get(KILL_SIGNAL) {
+    None => None,
+    Some(value) => Some(value.as_str().and_then(KillSignal::parse).ok_or_else(|| {
+      SchemaError::KillSignalValue { script: script.to_owned(), found: literal(value) }
+    })?),
+  };
+
+  Ok(Lifecycle {
+    timeout: parse_duration(script, object, TIMEOUT)?,
+    retries,
+    retry_delay,
+    kill_signal,
+    kill_timeout: parse_duration(script, object, KILL_TIMEOUT)?,
+  })
+}
+
+fn parse_retry_delay(
+  script: &str,
+  object: &serde_json::Map<String, serde_json::Value>,
+) -> Result<Option<RetryDelay>, SchemaError> {
+  let Some(value) = object.get(RETRY_DELAY) else {
+    return Ok(None);
+  };
+
+  if value.as_str() == Some(EXPONENTIAL) {
+    return Ok(Some(RetryDelay::Exponential));
+  }
+
+  let millis = whole(value).ok_or_else(|| SchemaError::RetryDelayValue {
+    script: script.to_owned(),
+    found: literal(value),
+  })?;
+
+  Ok(Some(RetryDelay::Fixed(Duration::from_millis(millis))))
+}
+
+/// A number of milliseconds, or the reason it is not one — negative and fractional being
+/// the two ways a duration is written wrong.
+fn parse_duration(
+  script: &str,
+  object: &serde_json::Map<String, serde_json::Value>,
+  key: &'static str,
+) -> Result<Option<Duration>, SchemaError> {
+  let Some(value) = object.get(key) else {
+    return Ok(None);
+  };
+
+  let millis = whole(value).ok_or_else(|| SchemaError::NotADuration {
+    script: script.to_owned(),
+    key,
+    found: literal(value),
+  })?;
+
+  Ok(Some(Duration::from_millis(millis)))
+}
+
+/// A number that counts something, however the engine spelled it.
+///
+/// A config is evaluated as JavaScript, where every number is a double: `1000` comes back
+/// as `1000.0`. Reading only integers here would reject every duration a user can write.
+/// Above `2^53` a double no longer carries whole numbers exactly, so a value that large is
+/// refused rather than silently rounded to one the config never said.
+fn whole(value: &serde_json::Value) -> Option<u64> {
+  /// The largest whole number a double represents exactly.
+  const EXACT: f64 = 9_007_199_254_740_992.0;
+
+  if let Some(counted) = value.as_u64() {
+    return Some(counted);
+  }
+
+  let number = value.as_f64()?;
+  if number.fract() != 0.0 || !(0.0..=EXACT).contains(&number) {
+    return None;
+  }
+
+  #[expect(
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    reason = "whole, positive and within the exactly representable range, checked above"
+  )]
+  Some(number as u64)
+}
+
+/// The value as the user wrote it, for the messages where naming its type explains
+/// nothing: `-5` and `1000` are both "a number", and only one of them is the mistake.
+fn literal(value: &serde_json::Value) -> String {
+  match value {
+    serde_json::Value::Number(number) => format!("`{number}`"),
+    serde_json::Value::String(text) => format!("`{text}`"),
+    other => describe(other),
+  }
 }
 
 fn parse_continue_on_error(
@@ -589,6 +846,16 @@ fn allowed_with(specific: &[&'static str]) -> Vec<&'static str> {
   specific.iter().copied().chain(COMMON_FIELDS.iter().copied()).collect()
 }
 
+/// The same, for a variant that runs a command of its own and so may say how it is run.
+fn allowed_to_run(specific: &[&'static str]) -> Vec<&'static str> {
+  specific
+    .iter()
+    .copied()
+    .chain(LIFECYCLE.iter().copied())
+    .chain(COMMON_FIELDS.iter().copied())
+    .collect()
+}
+
 fn reject_unknown_fields(
   script: &str,
   object: &serde_json::Map<String, serde_json::Value>,
@@ -619,9 +886,11 @@ fn describe(value: &serde_json::Value) -> String {
 
 #[cfg(test)]
 mod tests {
+  use std::time::Duration;
+
   use serde_json::json;
 
-  use super::{Kind, PerOsCommand, SuccessPolicy, parse};
+  use super::{KillSignal, Kind, PerOsCommand, RetryDelay, SuccessPolicy, parse};
 
   /// The command of a script that has one, for the tests that only care about that.
   fn command_of(config: &super::Config, name: &str, platform: &str) -> String {
@@ -1047,6 +1316,154 @@ mod tests {
 
     assert!(error.contains("`dev`"), "{error}");
     assert!(error.contains("interactive"), "{error}");
+  }
+
+  /// The three options a script most often carries together, all read back.
+  #[test]
+  fn lifecycle_options_parse_on_a_command_script() {
+    let config = parse(&json!({
+      "scripts": {
+        "e2e": { "command": "playwright test", "timeout": 30_000, "retries": 2, "retryDelay": "exponential" },
+      }
+    }))
+    .expect("parses");
+
+    let lifecycle = config.scripts["e2e"].lifecycle;
+    assert_eq!(lifecycle.timeout, Some(Duration::from_secs(30)));
+    assert_eq!(lifecycle.retries, Some(2));
+    assert_eq!(lifecycle.retry_delay, Some(RetryDelay::Exponential));
+  }
+
+  #[test]
+  fn a_numeric_retry_delay_is_milliseconds() {
+    let config = parse(&json!({
+      "scripts": { "flaky": { "command": "vitest", "retries": 1, "retryDelay": 250 } }
+    }))
+    .expect("parses");
+
+    assert_eq!(
+      config.scripts["flaky"].lifecycle.retry_delay,
+      Some(RetryDelay::Fixed(Duration::from_millis(250)))
+    );
+  }
+
+  #[test]
+  fn a_kill_signal_and_timeout_parse_on_an_extending_script() {
+    let config = parse(&json!({
+      "scripts": {
+        "dev": { "command": "node server.js" },
+        "dev:api": { "extends": "dev", "killSignal": "SIGINT", "killTimeout": 2000 },
+      }
+    }))
+    .expect("parses");
+
+    let lifecycle = config.scripts["dev:api"].lifecycle;
+    assert_eq!(lifecycle.kill_signal, Some(KillSignal::Int));
+    assert_eq!(lifecycle.kill_timeout, Some(Duration::from_secs(2)));
+  }
+
+  /// Test 5d.7's unit half — every option, on both kinds of group. A group is not a
+  /// process, so the message has to point at the members rather than merely refuse.
+  #[test]
+  fn a_lifecycle_option_on_a_group_is_rejected_and_says_where_it_belongs() {
+    for group in ["serial", "parallel"] {
+      for (option, value) in [
+        ("timeout", json!(1000)),
+        ("retries", json!(2)),
+        ("retryDelay", json!(500)),
+        ("killSignal", json!("SIGINT")),
+        ("killTimeout", json!(1000)),
+      ] {
+        let error = parse(&json!({
+          "scripts": { "ci": { group: ["a"], option: value } }
+        }))
+        .unwrap_err()
+        .to_string();
+
+        assert!(error.contains("`ci`"), "{group}/{option}: {error}");
+        assert!(error.contains(option), "{group}/{option}: {error}");
+        assert!(error.contains("members"), "{group}/{option}: {error}");
+      }
+    }
+  }
+
+  /// A delay between attempts that will never happen is a mistake rather than a
+  /// preference, so it is refused instead of quietly ignored.
+  #[test]
+  fn a_retry_delay_without_retries_is_rejected() {
+    let error = parse(&json!({ "scripts": { "a": { "command": "x", "retryDelay": 500 } } }))
+      .unwrap_err()
+      .to_string();
+
+    assert!(error.contains("`a`"), "{error}");
+    assert!(error.contains("retryDelay"), "{error}");
+    assert!(error.contains("retries"), "{error}");
+  }
+
+  /// The value written and the values accepted, both named. Neither alone turns the
+  /// message into an edit.
+  #[test]
+  fn a_retry_delay_that_is_neither_a_duration_nor_exponential_is_rejected() {
+    for written in [json!("fast"), json!(-5), json!(true)] {
+      let error = parse(
+        &json!({ "scripts": { "a": { "command": "x", "retries": 1, "retryDelay": written } } }),
+      )
+      .unwrap_err()
+      .to_string();
+
+      assert!(error.contains("`a`"), "{written}: {error}");
+      assert!(error.contains("retryDelay"), "{written}: {error}");
+      assert!(error.contains("exponential"), "{written}: {error}");
+    }
+  }
+
+  #[test]
+  fn an_unknown_kill_signal_names_the_value_and_the_permitted_ones() {
+    let error = parse(&json!({ "scripts": { "a": { "command": "x", "killSignal": "SIGSTOP" } } }))
+      .unwrap_err()
+      .to_string();
+
+    assert!(error.contains("`a`"), "{error}");
+    assert!(error.contains("SIGSTOP"), "{error}");
+    for permitted in KillSignal::PERMITTED {
+      assert!(error.contains(permitted), "{error}");
+    }
+  }
+
+  /// A duration is a count of milliseconds, so the two ways of writing one wrong — below
+  /// zero and between two whole numbers — are both refused, naming the value.
+  #[test]
+  fn a_duration_that_is_not_a_whole_number_of_milliseconds_is_rejected() {
+    for key in ["timeout", "killTimeout"] {
+      for written in [json!(-1), json!(1.5), json!("30s")] {
+        let error = parse(&json!({ "scripts": { "a": { "command": "x", key: written } } }))
+          .unwrap_err()
+          .to_string();
+
+        assert!(error.contains("`a`"), "{key} = {written}: {error}");
+        assert!(error.contains(key), "{key} = {written}: {error}");
+        assert!(error.contains("milliseconds"), "{key} = {written}: {error}");
+      }
+    }
+  }
+
+  #[test]
+  fn a_retries_count_that_is_not_a_whole_number_is_rejected() {
+    let error = parse(&json!({ "scripts": { "a": { "command": "x", "retries": -1 } } }))
+      .unwrap_err()
+      .to_string();
+
+    assert!(error.contains("`a`"), "{error}");
+    assert!(error.contains("retries"), "{error}");
+  }
+
+  /// A script that says nothing carries nothing, so execution applies its own defaults
+  /// rather than inheriting a value the config never wrote.
+  #[test]
+  fn a_script_that_declares_nothing_carries_no_lifecycle_options() {
+    let config = parse(&json!({ "scripts": { "a": { "command": "x" } } })).expect("parses");
+
+    assert_eq!(config.scripts["a"].lifecycle, super::Lifecycle::default());
   }
 
   #[test]

@@ -26,18 +26,12 @@ use rune_out::color::{ColorLevel, Palette};
 use rune_out::multiplex::{Multiplexer, ScriptId, Stream};
 use tokio::io::AsyncReadExt as _;
 use tokio::sync::{mpsc, oneshot};
-use tokio::time::{Instant, sleep, sleep_until};
+use tokio::time::{Instant, sleep_until};
 
+use crate::lifecycle::{TIMEOUT_CODE, hold};
 use crate::spawn::Wiring;
 use crate::teardown::Tree;
 use crate::{Completion, ExecError, ExecRequest, code_of, signals, spawn};
-
-/// How long a tree is given to end on its own before it is ended for it.
-///
-/// Long enough that a server flushing its state on the way out is not cut off, short
-/// enough that a member ignoring the request cannot hold the whole run open. Nothing here
-/// sequences anything: on the ordinary path the timer is cancelled long before it fires.
-const KILL_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// How much of a pipe is read at once.
 const CHUNK: usize = 8 * 1024;
@@ -77,7 +71,7 @@ pub enum Task<'a> {
 pub async fn alone(request: &ExecRequest<'_>) -> Result<Completion, ExecError> {
   let run = Run { events: channel::channel().0, color: ColorLevel::None };
 
-  leaf(request, Sink::Inherited, &run, &Control::default()).await
+  attempts(request, Sink::Inherited, &run, &Control::default()).await
 }
 
 /// Runs everything `task` stands for.
@@ -92,7 +86,19 @@ pub async fn execute(task: &Task<'_>) -> Result<Completion, ExecError> {
   // rune's own stdout for a run that has nothing to put through it.
   if names.is_empty() {
     let run = Run { events: channel::channel().0, color: ColorLevel::None };
-    return step(task, &labels, Sink::Inherited, &run, &root).await;
+    let body = step(task, &labels, Sink::Inherited, &run, &root);
+
+    // A child in rune's own process group already receives whatever the terminal sends,
+    // and rune's part is to wait rather than to act. Only a child rune placed out of that
+    // group has to be reached, and only then is the guard worth starting.
+    if !out_of_reach(task) {
+      return body.await;
+    }
+
+    return tokio::select! {
+      outcome = body => outcome,
+      () = guard(&root, None) => unreachable!("the guard waits forever once it has acted"),
+    };
   }
 
   let color = ColorLevel::detect();
@@ -110,7 +116,7 @@ pub async fn execute(task: &Task<'_>) -> Result<Completion, ExecError> {
     async {
       tokio::select! {
         outcome = body => outcome,
-        () = guard(&root, closed) => unreachable!("the guard waits forever once it has acted"),
+        () = guard(&root, Some(closed)) => unreachable!("the guard waits forever once it has acted"),
       }
     },
     write(receiver, &names, color, broken),
@@ -127,20 +133,44 @@ pub async fn execute(task: &Task<'_>) -> Result<Completion, ExecError> {
 ///
 /// Both reasons are the same event as far as the children are concerned — the run is over
 /// and nothing may survive it — so they share one path rather than two that could drift.
-async fn guard(root: &Control, closed: oneshot::Receiver<()>) {
+/// A run with nothing to write has no output that can close, and passes no receiver.
+async fn guard(root: &Control, closed: Option<oneshot::Receiver<()>>) {
   let mut interrupts = signals::interrupts();
 
-  tokio::select! {
-    _ = closed => {}
-    _ = interrupts.wait_for(Option::is_some) => {}
+  match closed {
+    Some(closed) => {
+      tokio::select! {
+        _ = closed => {}
+        _ = interrupts.wait_for(Option::is_some) => {}
+      }
+    }
+    None => {
+      let _ = interrupts.wait_for(Option::is_some).await;
+    }
   }
 
-  root.stop();
-  sleep(KILL_TIMEOUT).await;
-  root.kill();
+  // Each tree gets the wait its own script asked for, so one member's patience is never
+  // spent on another's.
+  let mut escalation = root.stop();
+  while let Some(at) = escalation {
+    sleep_until(at).await;
+    escalation = root.escalate(Instant::now());
+  }
 
   // Acted once; from here the run ends when its children do.
   pending::<()>().await;
+}
+
+/// Whether anything in this task runs where the terminal's own signals do not reach.
+///
+/// The answer is the same rule spawning uses to place a child in a process group of its
+/// own, asked before anything starts.
+fn out_of_reach(task: &Task<'_>) -> bool {
+  match task {
+    Task::Command(request) => request.wants_own_group(),
+    Task::Serial { steps, .. } => steps.iter().any(out_of_reach),
+    Task::Parallel { members, .. } => members.iter().any(|member| out_of_reach(&member.task)),
+  }
 }
 
 /// What every task in one invocation shares.
@@ -212,9 +242,18 @@ fn label(task: &Task<'_>, next: &mut ScriptId, names: &mut Vec<String>) -> Label
 /// after a teardown begins, nothing new may spawn.
 #[derive(Default)]
 struct Control {
-  running: RefCell<Vec<Tree>>,
+  running: RefCell<Vec<Running>>,
   nested: RefCell<Vec<Rc<Control>>>,
   stopping: Cell<bool>,
+}
+
+/// One tree running under a branch, and how far its teardown has got.
+struct Running {
+  tree: Tree,
+  asked: bool,
+  /// When the tree is ended whatever it wanted. Absent while it is running normally, and
+  /// absent after it has been asked with a signal nothing can catch.
+  deadline: Option<Instant>,
 }
 
 impl Control {
@@ -227,43 +266,93 @@ impl Control {
     nested
   }
 
+  /// Drops a branch that has finished, so the book-keeping of a retried script does not
+  /// grow with every attempt.
+  fn unnest(&self, branch: &Rc<Self>) {
+    self.nested.borrow_mut().retain(|nested| !Rc::ptr_eq(nested, branch));
+  }
+
   fn enter(&self, tree: Tree) {
+    let mut running = Running { tree, asked: false, deadline: None };
+
     // A child that started while its branch was being torn down would otherwise be the
     // one process nobody ends.
     if self.stopping.get() {
-      let _ = tree.terminate();
+      ask(&mut running);
     }
 
-    self.running.borrow_mut().push(tree);
+    self.running.borrow_mut().push(running);
   }
 
   fn leave(&self, leader: u32) {
-    self.running.borrow_mut().retain(|tree| tree.leader() != leader);
+    self.running.borrow_mut().retain(|running| running.tree.leader() != leader);
   }
 
-  /// Asks every tree under this branch to end, and stops anything new from starting.
-  fn stop(&self) {
-    self.stopping.set(true);
-    self.each(&|tree| {
-      let _ = tree.terminate();
+  /// Asks every tree under this branch to end, stops anything new from starting, and says
+  /// when the first of them has been patient long enough.
+  fn stop(&self) -> Option<Instant> {
+    let mut next = None;
+    self.walk(true, &mut |running| {
+      ask(running);
+      next = sooner(next, running.deadline);
     });
+
+    next
   }
 
-  /// Ends every tree under this branch whatever it wanted.
-  fn kill(&self) {
-    self.each(&|tree| {
-      let _ = tree.kill();
+  /// Ends every tree whose wait has run out, and says when the next one's does.
+  fn escalate(&self, now: Instant) -> Option<Instant> {
+    let mut next = None;
+    self.walk(false, &mut |running| {
+      let Some(deadline) = running.deadline else {
+        return;
+      };
+
+      if deadline > now {
+        next = sooner(next, Some(deadline));
+        return;
+      }
+
+      // Asked once and still here: nothing catches this one.
+      let _ = running.tree.kill();
+      running.deadline = None;
     });
+
+    next
   }
 
-  fn each(&self, act: &dyn Fn(&Tree)) {
-    for tree in self.running.borrow().iter() {
-      act(tree);
+  fn walk(&self, halt: bool, act: &mut dyn FnMut(&mut Running)) {
+    if halt {
+      self.stopping.set(true);
+    }
+
+    for running in self.running.borrow_mut().iter_mut() {
+      act(running);
     }
     for nested in self.nested.borrow().iter() {
-      nested.stopping.set(true);
-      nested.each(act);
+      nested.walk(halt, act);
     }
+  }
+}
+
+/// Asks one tree to end with the signal its script chose, and notes when that patience
+/// runs out. Asking twice would push the deadline further out every time, so it is asked
+/// exactly once.
+fn ask(running: &mut Running) {
+  if running.asked {
+    return;
+  }
+
+  running.asked = true;
+  let _ = running.tree.terminate();
+  running.deadline = running.tree.policy().escalation(Instant::now());
+}
+
+/// The earlier of two deadlines, either of which may be absent.
+fn sooner(held: Option<Instant>, candidate: Option<Instant>) -> Option<Instant> {
+  match (held, candidate) {
+    (Some(held), Some(candidate)) => Some(held.min(candidate)),
+    (held, candidate) => held.or(candidate),
   }
 }
 
@@ -280,7 +369,7 @@ fn step<'f>(
 ) -> LocalBoxFuture<'f, Result<Completion, ExecError>> {
   Box::pin(async move {
     match task {
-      Task::Command(request) => leaf(request, sink, run, control).await,
+      Task::Command(request) => attempts(request, sink, run, control).await,
       Task::Serial { steps, continue_on_error } => {
         serial(steps, labels, *continue_on_error, sink, run, control).await
       }
@@ -387,16 +476,10 @@ async fn parallel(
 
         if failed && !stopping {
           stopping = true;
-          escalation = Some(begin(&controls));
+          escalation = begin(&controls);
         }
       }
-      () = expiry(escalation) => {
-        escalation = None;
-        // Asked once and still here: nothing catches this one.
-        for branch in &controls {
-          branch.kill();
-        }
-      }
+      () = expiry(escalation) => escalation = escalate(&controls, Instant::now()),
     }
   }
 
@@ -421,13 +504,14 @@ fn judge(exits: &[Completion], policy: SuccessPolicy) -> Completion {
   Completion { code, caught_signal: caught }
 }
 
-/// Asks every member's tree to end, and says when patience runs out.
-fn begin(controls: &[Rc<Control>]) -> Instant {
-  for branch in controls {
-    branch.stop();
-  }
+/// Asks every member's tree to end, and says when the first of them must be ended for it.
+fn begin(controls: &[Rc<Control>]) -> Option<Instant> {
+  controls.iter().fold(None, |next, branch| sooner(next, branch.stop()))
+}
 
-  Instant::now() + KILL_TIMEOUT
+/// Ends every member's tree whose wait has run out, and says when the next one's does.
+fn escalate(controls: &[Rc<Control>], now: Instant) -> Option<Instant> {
+  controls.iter().fold(None, |next, branch| sooner(next, branch.escalate(now)))
 }
 
 /// The escalation deadline, or nothing at all while none is set.
@@ -449,6 +533,101 @@ fn child(labels: &Labels, index: usize) -> &Labels {
   static NOTHING: Labels = Labels { members: Vec::new(), children: Vec::new() };
 
   labels.children.get(index).unwrap_or(&NOTHING)
+}
+
+/// One command, run again while it fails and attempts remain.
+///
+/// The loop sits *inside* the unit a group observes, which is the whole of the retry
+/// contract: a member that fails once and then succeeds is one success to everything
+/// downstream. Outside it, a group's kill-others policy would fire on the first attempt's
+/// failure and tear down the siblings of a script that was about to succeed.
+async fn attempts(
+  request: &ExecRequest<'_>,
+  sink: Sink,
+  run: &Run,
+  control: &Control,
+) -> Result<Completion, ExecError> {
+  let lifecycle = request.lifecycle;
+  let mut attempt = 0;
+
+  loop {
+    // A branch of its own per attempt: a timeout ends this attempt's tree without closing
+    // the branch the attempts after it still have to start in.
+    let branch = control.nest();
+    let outcome = once(request, sink, run, &branch, lifecycle.timeout).await;
+    control.unnest(&branch);
+
+    let outcome = outcome?;
+    let retryable = outcome.completion.code != 0
+      && attempt < lifecycle.retries
+      // A run being torn down, or one the user interrupted, is over. Starting the next
+      // attempt would be rune reviving what something else just ended.
+      && outcome.completion.caught_signal.is_none()
+      && !control.stopping.get();
+
+    if !retryable {
+      // The timeout code is rune's answer, not the child's, and only the attempt nobody
+      // follows gets to give it.
+      let code = if outcome.timed_out { TIMEOUT_CODE } else { outcome.completion.code };
+      return Ok(Completion { code, ..outcome.completion });
+    }
+
+    attempt += 1;
+    hold(lifecycle.retry_delay, attempt).await;
+  }
+}
+
+/// How one attempt ended, and whether rune ended it for outliving its budget.
+struct Attempt {
+  completion: Completion,
+  timed_out: bool,
+}
+
+/// One attempt, ended through the escalation path if it outlives its timeout.
+///
+/// The child is never dropped for being late: the future waiting on it keeps being polled
+/// while the teardown runs, so the process is still collected and its pipes still drained.
+async fn once(
+  request: &ExecRequest<'_>,
+  sink: Sink,
+  run: &Run,
+  branch: &Control,
+  timeout: Option<Duration>,
+) -> Result<Attempt, ExecError> {
+  let running = leaf(request, sink, run, branch);
+
+  let Some(timeout) = timeout else {
+    return Ok(Attempt { completion: running.await?, timed_out: false });
+  };
+
+  tokio::pin!(running);
+  let mut deadline = Some(Instant::now() + timeout);
+  let mut escalation = None;
+  let mut timed_out = false;
+
+  let completion = loop {
+    tokio::select! {
+      outcome = &mut running => break outcome?,
+      () = expiry(deadline) => {
+        deadline = None;
+        timed_out = true;
+        rune_out::diagnostic(&overran(request.script_name, timeout));
+        escalation = branch.stop();
+      }
+      () = expiry(escalation) => escalation = branch.escalate(Instant::now()),
+    }
+  };
+
+  Ok(Attempt { completion, timed_out })
+}
+
+/// Why a script rune ended is reported before its exit code is: 124 on its own is
+/// indistinguishable from a child that chose to exit 124.
+fn overran(script: &str, timeout: Duration) -> String {
+  format!(
+    "`{script}` exceeded its {} ms timeout — its process tree was terminated",
+    timeout.as_millis()
+  )
 }
 
 /// One child process, started and waited for.

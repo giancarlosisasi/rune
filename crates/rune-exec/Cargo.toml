@@ -15,6 +15,11 @@ rune-out = { path = "../rune-out" }
 thiserror = { workspace = true }
 tokio = { workspace = true }
 
+[dev-dependencies]
+# `start_paused`: the retry schedule is asserted on a clock the test advances, so no test
+# here waits out a real delay.
+tokio = { workspace = true, features = ["test-util"] }
+
 [target.'cfg(unix)'.dependencies]
 nix = { workspace = true }
 

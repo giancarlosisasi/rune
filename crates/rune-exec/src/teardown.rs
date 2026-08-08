@@ -30,6 +30,8 @@ mod unix {
   use nix::sys::signal::{self, Signal};
   use nix::unistd::Pid;
 
+  use crate::lifecycle::{Kill, KillSignal};
+
   /// Whether a process id still names a live process.
   pub fn is_running(pid: u32) -> bool {
     let Ok(raw) = i32::try_from(pid) else {
@@ -72,15 +74,16 @@ mod unix {
   pub struct Tree {
     leader: u32,
     own_group: bool,
+    kill: Kill,
   }
 
   impl Tree {
-    pub fn own_group(leader: u32) -> Self {
-      Self { leader, own_group: true }
+    pub fn own_group(leader: u32, kill: Kill) -> Self {
+      Self { leader, own_group: true, kill }
     }
 
-    pub fn in_runes_group(leader: u32) -> Self {
-      Self { leader, own_group: false }
+    pub fn in_runes_group(leader: u32, kill: Kill) -> Self {
+      Self { leader, own_group: false, kill }
     }
 
     /// The process this tree is named by.
@@ -88,9 +91,15 @@ mod unix {
       self.leader
     }
 
-    /// Asks the tree to end: `SIGTERM`, which a child may catch and act on.
+    /// How this tree is ended: what it is asked with, and how long the asking lasts.
+    pub fn policy(&self) -> Kill {
+      self.kill
+    }
+
+    /// Asks the tree to end with the signal its script chose, which a child may catch and
+    /// act on.
     pub fn terminate(&self) -> io::Result<()> {
-      self.deliver(Signal::SIGTERM)
+      self.deliver(signal_of(self.kill.signal))
     }
 
     /// Ends the tree whatever it wanted. Nothing can catch `SIGKILL`.
@@ -122,6 +131,17 @@ mod unix {
     }
   }
 
+  /// The platform signal a configured name stands for.
+  fn signal_of(chosen: KillSignal) -> Signal {
+    match chosen {
+      KillSignal::Hup => Signal::SIGHUP,
+      KillSignal::Int => Signal::SIGINT,
+      KillSignal::Quit => Signal::SIGQUIT,
+      KillSignal::Term => Signal::SIGTERM,
+      KillSignal::Kill => Signal::SIGKILL,
+    }
+  }
+
   fn forgive_missing(result: Result<(), Errno>) -> io::Result<()> {
     match result {
       Ok(()) | Err(Errno::ESRCH) => Ok(()),
@@ -146,6 +166,8 @@ mod windows {
   use windows_sys::Win32::System::Threading::{
     GetExitCodeProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
   };
+
+  use crate::lifecycle::Kill;
 
   /// `GetExitCodeProcess` reports this while the process is alive.
   const STILL_ACTIVE: u32 = 259;
@@ -225,7 +247,9 @@ mod windows {
   /// The job holds the whole tree because membership is inherited, so a grandchild is
   /// reached without ever being named. Windows has no gentle form of this: a job is
   /// terminated or it is not, which is why [`Tree::terminate`] and [`Tree::kill`] do the
-  /// same thing here and the escalation timer only ever has work to do on POSIX.
+  /// same thing here and the escalation timer only ever has work to do on POSIX. A script
+  /// that configured a signal and a kill timeout gets the unconditional end either way,
+  /// and [`Tree::policy`] says so rather than starting a timer with nothing to wait for.
   #[derive(Debug, Clone)]
   pub struct Tree {
     job: Rc<JobObject>,
@@ -240,6 +264,14 @@ mod windows {
     /// The process this tree is named by.
     pub fn leader(&self) -> u32 {
       self.leader
+    }
+
+    #[expect(
+      clippy::unused_self,
+      reason = "the shape is the platform interface; a job has no gentler form to configure"
+    )]
+    pub fn policy(&self) -> Kill {
+      Kill::UNCONDITIONAL
     }
 
     pub fn terminate(&self) -> io::Result<()> {
@@ -306,7 +338,9 @@ mod tests {
 
   #[cfg(unix)]
   fn gone_trees() -> Vec<Tree> {
-    vec![Tree::own_group(GONE), Tree::in_runes_group(GONE)]
+    use crate::lifecycle::Kill;
+
+    vec![Tree::own_group(GONE, Kill::default()), Tree::in_runes_group(GONE, Kill::default())]
   }
 
   #[cfg(windows)]
