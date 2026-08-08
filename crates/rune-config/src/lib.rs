@@ -1,5 +1,6 @@
 //! Configuration loading for rune: `rune.config.ts` discovery, stripping and evaluation.
 pub mod cache;
+pub mod compose;
 pub mod discover;
 pub mod env;
 pub mod envfile;

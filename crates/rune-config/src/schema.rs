@@ -12,13 +12,19 @@ use serde::Deserialize;
 use thiserror::Error;
 
 /// The keys that decide which kind of script an entry is. Each later change adds one.
-const DISCRIMINANTS: &[&str] = &["command", "extends"];
+const DISCRIMINANTS: &[&str] = &["command", "extends", "serial"];
 
 /// Fields any script may carry, whatever its discriminant.
 const COMMON_FIELDS: &[&str] = &["description", "cwd", "env", "envFile"];
 
 /// The arguments an extending script adds to what it inherits.
 const APPEND_ARGS: &str = "appendArgs";
+
+/// The scripts that run before a script's own command.
+const DEPENDS_ON: &str = "dependsOn";
+
+/// Makes a group run every member instead of stopping at the first failure.
+const CONTINUE_ON_ERROR: &str = "continueOnError";
 
 /// The keys a per-OS `command` object may hold. The names are Node's `process.platform`
 /// values, so a config reading `rune.platform` and a config using this object spell the
@@ -77,22 +83,58 @@ pub enum SchemaError {
   #[error("script `{script}` extends {found}\n\n`extends` is the name of another script")]
   ExtendsShape { script: String, found: String },
 
-  #[error(
-    "script `{script}` has an `{APPEND_ARGS}` that is {found}\n\n\
-     `{APPEND_ARGS}` is a list of arguments, one element per argument:\n\n  \
-     {APPEND_ARGS}: [\"--maxWorkers=1\"]"
-  )]
-  AppendArgsShape { script: String, found: String },
+  #[error("script `{script}` has a `{key}` that is {found}\n\n{explanation}")]
+  NotAList { script: String, key: &'static str, found: String, explanation: &'static str },
+
+  #[error("script `{script}` has `{key}` element {position} that is {found}\n\n{explanation}")]
+  NotAListElement {
+    script: String,
+    key: &'static str,
+    position: usize,
+    found: String,
+    explanation: &'static str,
+  },
 
   #[error(
-    "script `{script}` has {APPEND_ARGS} element {position} that is {found}\n\n\
-     every element is one argument, written as a string"
+    "script `{script}` sets `{DEPENDS_ON}` beside `serial`\n\n\
+     a group already says what runs and in which order — its member list. A second \
+     ordering\non the same entry would have no unambiguous meaning. Put the prerequisite \
+     first in\nthe member list instead."
   )]
-  AppendArgsElement { script: String, position: usize, found: String },
+  DependsOnGroup { script: String },
+
+  #[error(
+    "script `{script}` has a `{CONTINUE_ON_ERROR}` that is {found}\n\n\
+     `{CONTINUE_ON_ERROR}` is true or false. Set, every member runs even after one fails, \
+     and\nthe group still ends with the first failure's exit code."
+  )]
+  ContinueOnErrorShape { script: String, found: String },
 
   #[error("script `{script}`: {source}")]
   Invalid { script: String, source: serde_json::Error },
 }
+
+/// What a list-valued key holds, printed when the value is not a list of strings.
+///
+/// The pairs sit together because the two messages a user can meet for one key have to
+/// agree with each other about what that key is for.
+const APPEND_ARGS_LIST: (&str, &str) = (
+  "`appendArgs` is a list of arguments, one element per argument:\n\n  \
+   appendArgs: [\"--maxWorkers=1\"]",
+  "every element is one argument, written as a string",
+);
+
+const SERIAL_LIST: (&str, &str) = (
+  "`serial` is a list of script names, run one at a time in the order written:\n\n  \
+   serial: [\"lint\", \"typecheck\", \"test\"]",
+  "every element is the name of another script, written as a string",
+);
+
+const DEPENDS_ON_LIST: (&str, &str) = (
+  "`dependsOn` is a list of script names, run to completion before this script's own \
+   command:\n\n  dependsOn: [\"clean\"]",
+  "every element is the name of another script, written as a string",
+);
 
 fn list(names: &[&str]) -> String {
   names.iter().map(|name| format!("`{name}`")).collect::<Vec<_>>().join(", ")
@@ -107,6 +149,7 @@ fn meaning(discriminant: &str) -> &'static str {
   match discriminant {
     "command" => "runs a command of its own",
     "extends" => "builds on another script and adds to it",
+    "serial" => "runs other scripts, one after another",
     other => unreachable!("`{other}` is listed as a discriminant but has no meaning"),
   }
 }
@@ -130,6 +173,12 @@ pub struct Script {
   /// A file of variables that fill the gaps the process environment leaves. Resolved
   /// against the config that declares it, never against the working directory.
   pub env_file: Option<String>,
+  /// Scripts that run to completion before this one's own command.
+  ///
+  /// `None` means the entry said nothing, so an extending script inherits what it builds
+  /// on; an empty list means it said "nothing runs first" and that wins. A group never
+  /// carries one — its member list is already the order.
+  pub depends_on: Option<Vec<String>>,
   pub kind: Kind,
 }
 
@@ -139,6 +188,8 @@ pub enum Kind {
   Command(Command),
   /// Runs another script's command, with more arguments after it.
   Extends { target: String, append_args: Vec<String> },
+  /// Runs other scripts, one at a time, in the order written.
+  Serial { members: Vec<String>, continue_on_error: bool },
 }
 
 /// What a script runs: one command everywhere, or one per operating system.
@@ -236,10 +287,18 @@ fn parse_script(name: &str, entry: &serde_json::Value) -> Result<Script, SchemaE
     return Err(SchemaError::AppendArgsWithoutExtends { script: name.to_owned() });
   }
 
+  if object.contains_key(DEPENDS_ON) && object.contains_key("serial") {
+    return Err(SchemaError::DependsOnGroup { script: name.to_owned() });
+  }
+
   let Some(discriminant) = found else {
     // A misspelled discriminant is indistinguishable from a missing one, and it is by
     // far the likelier mistake, so name the offending word when there is one.
-    reject_unknown_fields(name, object, &allowed_with(DISCRIMINANTS))?;
+    // `dependsOn` is legal beside any variant but is not one, so an entry carrying only
+    // that is missing a discriminant rather than holding an unknown field.
+    let mut legal = DISCRIMINANTS.to_vec();
+    legal.push(DEPENDS_ON);
+    reject_unknown_fields(name, object, &allowed_with(&legal))?;
     return Err(SchemaError::NoDiscriminant { script: name.to_owned() });
   };
 
@@ -247,14 +306,23 @@ fn parse_script(name: &str, entry: &serde_json::Value) -> Result<Script, SchemaE
     "command" => {
       // Checked before deserializing so the message can name the script. serde's own
       // unknown-field error knows the field but not which entry it came from.
-      reject_unknown_fields(name, object, &allowed_with(&["command"]))?;
+      reject_unknown_fields(name, object, &allowed_with(&["command", DEPENDS_ON]))?;
       Kind::Command(parse_command(name, &object["command"])?)
     }
     "extends" => {
-      reject_unknown_fields(name, object, &allowed_with(&["extends", APPEND_ARGS]))?;
+      reject_unknown_fields(name, object, &allowed_with(&["extends", APPEND_ARGS, DEPENDS_ON]))?;
       parse_extends(name, object)?
     }
+    "serial" => {
+      reject_unknown_fields(name, object, &allowed_with(&["serial", CONTINUE_ON_ERROR]))?;
+      parse_serial(name, object)?
+    }
     other => unreachable!("`{other}` is listed as a discriminant but has no arm"),
+  };
+
+  let depends_on = match object.get(DEPENDS_ON) {
+    None => None,
+    Some(value) => Some(string_list(name, DEPENDS_ON, value, DEPENDS_ON_LIST)?),
   };
 
   let common: Common = serde_json::from_value(entry.clone())
@@ -265,8 +333,60 @@ fn parse_script(name: &str, entry: &serde_json::Value) -> Result<Script, SchemaE
     cwd: common.cwd,
     env: common.env,
     env_file: common.env_file,
+    depends_on,
     kind,
   })
+}
+
+fn parse_serial(
+  script: &str,
+  object: &serde_json::Map<String, serde_json::Value>,
+) -> Result<Kind, SchemaError> {
+  let members = string_list(script, "serial", &object["serial"], SERIAL_LIST)?;
+
+  let continue_on_error = match object.get(CONTINUE_ON_ERROR) {
+    None => false,
+    Some(value) => value.as_bool().ok_or_else(|| SchemaError::ContinueOnErrorShape {
+      script: script.to_owned(),
+      found: describe(value),
+    })?,
+  };
+
+  Ok(Kind::Serial { members, continue_on_error })
+}
+
+/// A list of strings, or the reason `value` is not one.
+///
+/// `explanation` carries what the key is for, once for the whole value and once for a
+/// single bad element, so three keys share the checking without sharing their wording.
+fn string_list(
+  script: &str,
+  key: &'static str,
+  value: &serde_json::Value,
+  explanation: (&'static str, &'static str),
+) -> Result<Vec<String>, SchemaError> {
+  let (whole, element) = explanation;
+
+  let items = value.as_array().ok_or_else(|| SchemaError::NotAList {
+    script: script.to_owned(),
+    key,
+    found: describe(value),
+    explanation: whole,
+  })?;
+
+  items
+    .iter()
+    .enumerate()
+    .map(|(position, item)| {
+      item.as_str().map(str::to_owned).ok_or_else(|| SchemaError::NotAListElement {
+        script: script.to_owned(),
+        key,
+        position,
+        found: describe(item),
+        explanation: element,
+      })
+    })
+    .collect()
 }
 
 fn parse_extends(
@@ -283,20 +403,7 @@ fn parse_extends(
     return Ok(Kind::Extends { target, append_args: Vec::new() });
   };
 
-  let arguments = arguments.as_array().ok_or_else(|| SchemaError::AppendArgsShape {
-    script: script.to_owned(),
-    found: describe(arguments),
-  })?;
-
-  let mut append_args = Vec::with_capacity(arguments.len());
-  for (position, argument) in arguments.iter().enumerate() {
-    let argument = argument.as_str().ok_or_else(|| SchemaError::AppendArgsElement {
-      script: script.to_owned(),
-      position,
-      found: describe(argument),
-    })?;
-    append_args.push(argument.to_owned());
-  }
+  let append_args = string_list(script, APPEND_ARGS, arguments, APPEND_ARGS_LIST)?;
 
   Ok(Kind::Extends { target, append_args })
 }
@@ -383,7 +490,7 @@ mod tests {
   fn command_of(config: &super::Config, name: &str, platform: &str) -> String {
     match &config.scripts[name].kind {
       Kind::Command(command) => command.select(platform).to_owned(),
-      Kind::Extends { .. } => panic!("`{name}` extends rather than running a command"),
+      _ => panic!("`{name}` does not run a command of its own"),
     }
   }
 
@@ -550,6 +657,140 @@ mod tests {
     assert!(error.contains("`empty`"), "{error}");
     assert!(error.contains("`command`"), "{error}");
     assert!(error.contains("`extends`"), "{error}");
+  }
+
+  /// The `serial` half of the dispatch, with both of its fields.
+  #[test]
+  fn a_serial_group_parses() {
+    let config = parse(&json!({
+      "scripts": {
+        "ci": { "serial": ["lint", "test"], "continueOnError": true },
+      }
+    }))
+    .expect("parses");
+
+    let Kind::Serial { members, continue_on_error } = &config.scripts["ci"].kind else {
+      panic!("`ci` did not parse as a group");
+    };
+    assert_eq!(members, &["lint".to_owned(), "test".to_owned()]);
+    assert!(*continue_on_error);
+  }
+
+  /// Stopping at the first failure is the default, so a group that says nothing about it
+  /// must not quietly run everything.
+  #[test]
+  fn a_group_stops_at_the_first_failure_unless_it_says_otherwise() {
+    let config = parse(&json!({ "scripts": { "ci": { "serial": ["lint"] } } })).expect("parses");
+
+    let Kind::Serial { continue_on_error, .. } = &config.scripts["ci"].kind else {
+      panic!("`ci` did not parse as a group");
+    };
+    assert!(!*continue_on_error);
+  }
+
+  #[test]
+  fn a_serial_that_is_not_a_list_of_names_is_rejected() {
+    let error =
+      parse(&json!({ "scripts": { "ci": { "serial": "lint" } } })).unwrap_err().to_string();
+    assert!(error.contains("`ci`"), "{error}");
+    assert!(error.contains("`serial`"), "{error}");
+
+    let error = parse(&json!({ "scripts": { "ci": { "serial": [1] } } })).unwrap_err().to_string();
+    assert!(error.contains("element 0"), "{error}");
+  }
+
+  #[test]
+  fn a_continue_on_error_that_is_not_a_boolean_is_rejected() {
+    let error =
+      parse(&json!({ "scripts": { "ci": { "serial": ["a"], "continueOnError": "yes" } } }))
+        .unwrap_err()
+        .to_string();
+
+    assert!(error.contains("`ci`"), "{error}");
+    assert!(error.contains("`continueOnError`"), "{error}");
+  }
+
+  /// Test 5a's schema half — a group also declaring a command has no meaning rune could
+  /// pick, and the conflict message has to name both words.
+  #[test]
+  fn a_group_that_also_declares_a_command_is_rejected() {
+    let error = parse(&json!({ "scripts": { "ci": { "serial": ["a"], "command": "vitest" } } }))
+      .unwrap_err()
+      .to_string();
+
+    assert!(error.contains("`ci`"), "{error}");
+    assert!(error.contains("`command`"), "{error}");
+    assert!(error.contains("`serial`"), "{error}");
+  }
+
+  #[test]
+  fn a_group_that_also_extends_is_rejected() {
+    let error = parse(&json!({ "scripts": { "ci": { "serial": ["a"], "extends": "b" } } }))
+      .unwrap_err()
+      .to_string();
+
+    assert!(error.contains("`extends`"), "{error}");
+    assert!(error.contains("`serial`"), "{error}");
+  }
+
+  /// `appendArgs` on a group is caught by the rule that catches it anywhere else: there
+  /// is no inherited command for the arguments to join.
+  #[test]
+  fn a_group_that_appends_arguments_is_rejected() {
+    let error = parse(&json!({ "scripts": { "ci": { "serial": ["a"], "appendArgs": ["--x"] } } }))
+      .unwrap_err()
+      .to_string();
+
+    assert!(error.contains("`ci`"), "{error}");
+    assert!(error.contains("appendArgs"), "{error}");
+  }
+
+  #[test]
+  fn a_command_script_carries_its_prerequisites() {
+    let config = parse(&json!({
+      "scripts": { "build": { "command": "tsc -b", "dependsOn": ["clean"] } }
+    }))
+    .expect("parses");
+
+    assert_eq!(
+      config.scripts["build"].depends_on.as_deref(),
+      Some(["clean".to_owned()].as_slice())
+    );
+  }
+
+  /// A group already says what runs and in which order. A second ordering on the same
+  /// entry would have no unambiguous meaning, so it is refused rather than picked between.
+  #[test]
+  fn depends_on_beside_serial_is_rejected() {
+    let error = parse(&json!({ "scripts": { "ci": { "serial": ["a"], "dependsOn": ["b"] } } }))
+      .unwrap_err()
+      .to_string();
+
+    assert!(error.contains("`ci`"), "{error}");
+    assert!(error.contains("`dependsOn`"), "{error}");
+    assert!(error.contains("`serial`"), "{error}");
+  }
+
+  /// `dependsOn` says when a script runs, never what it runs, so it cannot stand on its
+  /// own. The message has to be the missing-discriminant one, not "unknown field".
+  #[test]
+  fn depends_on_alone_is_not_a_variant() {
+    let error = parse(&json!({ "scripts": { "build": { "dependsOn": ["clean"] } } }))
+      .unwrap_err()
+      .to_string();
+
+    assert!(error.contains("`build`"), "{error}");
+    assert!(error.contains("no command"), "{error}");
+    assert!(error.contains("`serial`"), "{error}");
+  }
+
+  #[test]
+  fn a_depends_on_that_is_not_a_list_of_names_is_rejected() {
+    let error = parse(&json!({ "scripts": { "b": { "command": "x", "dependsOn": "a" } } }))
+      .unwrap_err()
+      .to_string();
+
+    assert!(error.contains("`dependsOn`"), "{error}");
   }
 
   #[test]

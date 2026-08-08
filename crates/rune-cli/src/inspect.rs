@@ -13,9 +13,10 @@ use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 
 use rune_config::env::PLATFORM;
-use rune_config::inherit::{Resolved, Scope};
+use rune_config::inherit::{Link, Resolved, Runs, Scope};
 use rune_config::load::Loaded;
 use rune_config::paths::relative_to;
+use rune_config::schema::Command;
 use rune_exec::environment::{self, Descriptor, Layering};
 use rune_exec::quote::command_line;
 use rune_exec::shell::{SHELL_VARIABLE, Shell};
@@ -42,7 +43,22 @@ fn render(name: &str, resolved: &Resolved<'_>, loaded: &Loaded) -> String {
   let root = &loaded.discovered.root;
   let mut report = format!("{name}\n\n");
 
-  let _ = writeln!(report, "{:<LABEL$}  {}", "command", assembled_command(resolved));
+  match resolved.runs {
+    Runs::Command(command) => {
+      let _ = writeln!(report, "{:<LABEL$}  {}", "command", assembled_command(resolved, command));
+    }
+    Runs::Serial { members, continue_on_error } => {
+      let _ = writeln!(report, "{:<LABEL$}  {}", "runs", members.join(" → "));
+      if continue_on_error {
+        let _ = writeln!(report, "{:<LABEL$}  keeps going, then reports the first", "on failure");
+      }
+    }
+  }
+
+  if !resolved.depends_on.is_empty() {
+    let _ = writeln!(report, "{:<LABEL$}  {}", "runs first", resolved.depends_on.join(" → "));
+  }
+
   let _ = writeln!(
     report,
     "{:<LABEL$}  {}",
@@ -70,17 +86,28 @@ fn render(name: &str, resolved: &Resolved<'_>, loaded: &Loaded) -> String {
   let name_width = resolved.chain.iter().map(|link| link.name.len()).max().unwrap_or(0);
 
   for (link, source) in resolved.chain.iter().zip(&sources) {
-    let contribution = if link.append_args.is_empty() {
-      format!("runs `{}`", resolved.command.select(PLATFORM))
-    } else {
-      format!("appends `{}`", link.append_args.join(" "))
-    };
+    let contribution = contribution(link, resolved);
 
     let _ =
       writeln!(report, "  {source:<source_width$}  {:<name_width$}  {contribution}", link.name);
   }
 
   report.trim_end().to_owned()
+}
+
+/// What one step of the chain put into the answer.
+///
+/// A link that appends arguments says so; the one at the base is the one that decides what
+/// actually runs, which is a command for most scripts and a member list for a group.
+fn contribution(link: &Link<'_>, resolved: &Resolved<'_>) -> String {
+  if !link.append_args.is_empty() {
+    return format!("appends `{}`", link.append_args.join(" "));
+  }
+
+  match resolved.runs {
+    Runs::Command(command) => format!("runs `{}`", command.select(PLATFORM)),
+    Runs::Serial { members, .. } => format!("runs {}", members.join(", ")),
+  }
 }
 
 /// The environment `run` would build, worked out without running anything.
@@ -106,11 +133,11 @@ fn layered(name: &str, resolved: &Resolved<'_>, loaded: &Loaded) -> Layering {
 ///
 /// The shell is identified by name only. Locating it on disk is what `run` does, and
 /// doing it here would make an explanation fail on a machine where the tool is missing.
-fn assembled_command(resolved: &Resolved<'_>) -> String {
+fn assembled_command(resolved: &Resolved<'_>, command: &Command) -> String {
   let configured = std::env::var_os(SHELL_VARIABLE);
   let shell = Shell::select(configured.as_deref());
 
-  command_line(resolved.command.select(PLATFORM), &resolved.append_args, shell.kind)
+  command_line(command.select(PLATFORM), &resolved.append_args, shell.kind)
 }
 
 /// Where the script would run: the same rule `run` applies, so the two cannot disagree.

@@ -1,0 +1,8 @@
+---
+source: crates/rune-config/tests/composition.rs
+description: a prerequisite no script defines
+expression: error
+---
+script `build` depends on `clen`, which no script defines
+
+did you mean `clean`?

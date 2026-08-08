@@ -1,0 +1,12 @@
+---
+source: crates/rune-config/tests/composition.rs
+description: dependsOn on a group
+expression: error
+---
+[TMP]/rune.config.ts is not a valid rune config
+
+script `ci` sets `dependsOn` beside `serial`
+
+a group already says what runs and in which order — its member list. A second ordering
+on the same entry would have no unambiguous meaning. Put the prerequisite first in
+the member list instead.

@@ -16,7 +16,7 @@ use thiserror::Error;
 
 use crate::envfile::{self, EnvFile, EnvFileError};
 use crate::schema::{Command, Config, Kind, Script};
-use crate::suggest::closest;
+use crate::suggest::{closest, did_you_mean};
 
 /// One config taking part in resolution.
 #[derive(Debug, Clone)]
@@ -62,18 +62,23 @@ pub enum InheritError {
      a chain of `extends` has to end at a script with a `command`."
   )]
   Cycle { path: String },
-}
 
-fn did_you_mean(suggestion: Option<&str>) -> String {
-  suggestion.map_or_else(String::new, |name| format!("\n\ndid you mean `{name}`?"))
+  #[error(
+    "script `{script}` extends `{target}`, which is a group\n\n\
+     `extends` builds on the command a script runs, and a group has none of its own — it \
+     names\nthe scripts it runs. To reuse a group, name it as a member of another group."
+  )]
+  ExtendsGroup { script: String, target: String },
 }
 
 /// A script name, answered: what runs, where, with what, and how that was arrived at.
 #[derive(Debug)]
 pub struct Resolved<'a> {
-  pub command: &'a Command,
+  pub runs: Runs<'a>,
   /// Accumulated from the base outward, so the outermost script's arguments come last.
   pub append_args: Vec<String>,
+  /// The scripts that run before this one, in order. Empty when it has none.
+  pub depends_on: &'a [String],
   pub description: Option<&'a str>,
   pub cwd: Option<&'a str>,
   pub env: BTreeMap<String, String>,
@@ -84,6 +89,25 @@ pub struct Resolved<'a> {
   pub env_files: Vec<&'a EnvFile>,
   /// The base first, then every script that built on it.
   pub chain: Vec<Link<'a>>,
+}
+
+impl<'a> Resolved<'a> {
+  /// The command this name runs, or nothing when it is a group of other scripts.
+  pub fn command(&self) -> Option<&'a Command> {
+    match self.runs {
+      Runs::Command(command) => Some(command),
+      Runs::Serial { .. } => None,
+    }
+  }
+}
+
+/// What running a name actually does.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Runs<'a> {
+  /// A command of its own.
+  Command(&'a Command),
+  /// Other scripts, one at a time, in the order written.
+  Serial { members: &'a [String], continue_on_error: bool },
 }
 
 /// One step of a resolution: a definition, and what it contributed.
@@ -125,6 +149,10 @@ pub fn resolve<'a>(
     let Some(next) = find(layers, target, from) else {
       return Err(missing_target(layers, floor, &walked, key, target));
     };
+
+    if matches!(next.2.kind, Kind::Serial { .. }) {
+      return Err(InheritError::ExtendsGroup { script: key.to_owned(), target: target.to_owned() });
+    }
 
     if walked.iter().any(|(seen_layer, seen_key, _)| (*seen_layer, *seen_key) == (next.0, next.1)) {
       return Err(InheritError::Cycle { path: render_path(&walked, next.1) });
@@ -200,8 +228,9 @@ fn render_path(walked: &[Step<'_>], repeated: &str) -> String {
 /// Folds the chain base-outward. Later levels win per key, so an extending script
 /// overrides only what it declares and inherits everything it does not.
 fn merge<'a>(layers: &'a [Layer], walked: &[Step<'a>]) -> Resolved<'a> {
-  let mut command = None;
+  let mut runs = None;
   let mut append_args = Vec::new();
+  let mut depends_on: &[String] = &[];
   let mut description = None;
   let mut cwd = None;
   let mut env: BTreeMap<String, String> = BTreeMap::new();
@@ -211,13 +240,22 @@ fn merge<'a>(layers: &'a [Layer], walked: &[Step<'a>]) -> Resolved<'a> {
   for (layer, name, script) in walked {
     let contributed: &[String] = match &script.kind {
       Kind::Command(own) => {
-        command = Some(own);
+        runs = Some(Runs::Command(own));
+        &[]
+      }
+      Kind::Serial { members, continue_on_error } => {
+        runs = Some(Runs::Serial { members, continue_on_error: *continue_on_error });
         &[]
       }
       Kind::Extends { append_args, .. } => append_args,
     };
 
     append_args.extend_from_slice(contributed);
+    // A declared list wins whole, so an extending script can also say that nothing runs
+    // first. Merging the two would leave a prerequisite impossible to drop.
+    if let Some(declared) = &script.depends_on {
+      depends_on = declared;
+    }
     if script.description.is_some() {
       description = script.description.as_deref();
     }
@@ -244,8 +282,9 @@ fn merge<'a>(layers: &'a [Layer], walked: &[Step<'a>]) -> Resolved<'a> {
   env_files.reverse();
 
   Resolved {
-    command: command.expect("the walk only stops at a script with a command"),
+    runs: runs.expect("the walk only stops at a script that runs something"),
     append_args,
+    depends_on,
     description,
     cwd,
     env,
@@ -258,10 +297,18 @@ fn merge<'a>(layers: &'a [Layer], walked: &[Step<'a>]) -> Resolved<'a> {
 mod tests {
   use std::path::{Path, PathBuf};
 
-  use super::{InheritError, Layer, Scope, resolve};
+  use super::{InheritError, Layer, Resolved, Runs, Scope, resolve};
   use crate::schema::parse;
 
   const PLATFORM: &str = "linux";
+
+  /// What a resolution runs, for the tests that only care about the command.
+  fn command_of<'a>(resolved: &Resolved<'a>) -> &'a str {
+    match resolved.runs {
+      Runs::Command(command) => command.select(PLATFORM),
+      Runs::Serial { .. } => panic!("resolved to a group rather than a command"),
+    }
+  }
 
   fn layer(source: &str, scripts: &str) -> Layer {
     let value: serde_json::Value =
@@ -293,7 +340,7 @@ mod tests {
     let resolved =
       resolve(&layers, "test:ci:dot", Scope::Nearest).expect("resolves").expect("defined");
 
-    assert_eq!(resolved.command.select(PLATFORM), "vitest");
+    assert_eq!(command_of(&resolved), "vitest");
     assert_eq!(resolved.append_args, ["--run", "--reporter=dot", "--bail=1"]);
   }
 
@@ -416,7 +463,7 @@ mod tests {
 
     let resolved = resolve(&layers, "test", Scope::Nearest).expect("resolves").expect("defined");
 
-    assert_eq!(resolved.command.select(PLATFORM), "jest");
+    assert_eq!(command_of(&resolved), "jest");
     assert_eq!(resolved.append_args, ["--maxWorkers=1"]);
     assert_eq!(resolved.chain.len(), 2, "the root and the package both contributed");
   }
@@ -443,6 +490,81 @@ mod tests {
       resolve(&layers, "legacy-only", Scope::Root).expect("not an error").is_none(),
       "a package-only script is invisible at the root"
     );
+  }
+
+  /// A group resolves to its member list, not to a command, and the walk stops there the
+  /// same way it stops at a `command`.
+  #[test]
+  fn a_group_resolves_to_its_members() {
+    let layers = root(
+      r#"{
+        "lint": { "command": "eslint ." },
+        "test": { "command": "vitest" },
+        "ci": { "serial": ["lint", "test"], "continueOnError": true }
+      }"#,
+    );
+
+    let resolved = resolve(&layers, "ci", Scope::Nearest).expect("resolves").expect("defined");
+
+    let Runs::Serial { members, continue_on_error } = resolved.runs else {
+      panic!("`ci` did not resolve to a group");
+    };
+    assert_eq!(members, ["lint".to_owned(), "test".to_owned()]);
+    assert!(continue_on_error);
+    assert!(resolved.command().is_none());
+  }
+
+  /// A script says nothing about prerequisites, so it keeps the ones it inherits — the
+  /// same rule `cwd` and `description` follow.
+  #[test]
+  fn an_undeclared_depends_on_is_inherited() {
+    let layers = root(
+      r#"{
+        "clean": { "command": "rm -rf dist" },
+        "build": { "command": "tsc -b", "dependsOn": ["clean"] },
+        "build:ci": { "extends": "build", "appendArgs": ["--force"] }
+      }"#,
+    );
+
+    let resolved =
+      resolve(&layers, "build:ci", Scope::Nearest).expect("resolves").expect("defined");
+
+    assert_eq!(resolved.depends_on, ["clean".to_owned()]);
+  }
+
+  /// The list wins whole, which is what lets a package drop a prerequisite it does not
+  /// want. Merging the two lists instead would leave one impossible to remove.
+  #[test]
+  fn a_declared_depends_on_replaces_the_inherited_one() {
+    let layers = root(
+      r#"{
+        "clean": { "command": "rm -rf dist" },
+        "build": { "command": "tsc -b", "dependsOn": ["clean"] },
+        "build:fast": { "extends": "build", "dependsOn": [] }
+      }"#,
+    );
+
+    let resolved =
+      resolve(&layers, "build:fast", Scope::Nearest).expect("resolves").expect("defined");
+
+    assert!(resolved.depends_on.is_empty());
+  }
+
+  /// A group has no command for the inherited arguments to join, so extending one is
+  /// refused rather than silently dropping them.
+  #[test]
+  fn extending_a_group_is_rejected() {
+    let layers = root(
+      r#"{ "ci": { "serial": ["lint"] }, "lint": { "command": "eslint ." }, "x": { "extends": "ci" } }"#,
+    );
+
+    let error = resolve(&layers, "x", Scope::Nearest).unwrap_err();
+
+    let InheritError::ExtendsGroup { script, target } = error else {
+      panic!("expected a group rejection, got {error}");
+    };
+    assert_eq!(script, "x");
+    assert_eq!(target, "ci");
   }
 
   /// A package narrowing a shared script narrows everything built on it too. Without

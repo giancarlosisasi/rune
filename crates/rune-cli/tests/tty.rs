@@ -34,6 +34,16 @@ fn config(command: &str) -> String {
   format!("export default {{ scripts: {{ probe: {{ command: \"{command}\" }} }} }};\n")
 }
 
+/// The same command, reached through a serial group rather than run by name.
+fn chained_config(command: &str) -> String {
+  format!(
+    "export default {{ scripts: {{ \
+     step: {{ command: \"{command}\" }}, \
+     probe: {{ serial: [\"step\"] }} \
+     }} }};\n"
+  )
+}
+
 /// Test 3.17 — colors, progress bars and watch-mode interfaces all depend on this one
 /// answer being true.
 #[test]
@@ -52,6 +62,31 @@ fn under_a_terminal_the_child_sees_a_terminal_on_all_three_descriptors() {
   let report = report_in(&transcript);
   for stream in ["stdin", "stdout", "stderr"] {
     assert_eq!(report[stream], true, "{stream} was not a terminal\n{transcript}");
+  }
+}
+
+/// Test 5a.9's secondary check — a member of a chain owns the terminal exactly as a lone
+/// script does.
+///
+/// The byte-equality assertion in `composition.rs` is the cheap primary one. This is what
+/// says the promise is inheritance rather than a faithful copy: the terminal itself is
+/// what the child is given.
+#[test]
+fn a_child_inside_a_serial_chain_still_sees_a_terminal() {
+  let test = Test::new()
+    .config(&chained_config(&format!("{TOOL} isatty")))
+    .tool(&format!("node_modules/.bin/{TOOL}"));
+
+  let mut session = Session::start(&test);
+  session.await_text("\"stdin\"");
+  let status = session.wait();
+  let transcript = session.transcript();
+
+  assert!(status.success(), "rune exited {status:?}\n{transcript}");
+
+  let report = report_in(&transcript);
+  for stream in ["stdin", "stdout", "stderr"] {
+    assert_eq!(report[stream], true, "{stream} was not a terminal in a chain\n{transcript}");
   }
 }
 

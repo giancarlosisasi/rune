@@ -13,6 +13,7 @@ use std::path::{Path, PathBuf};
 use thiserror::Error;
 
 use crate::cache::{self, Cache};
+use crate::compose::{self, ComposeError, Plan};
 use crate::discover::{Discovered, NotFound, discover};
 use crate::env::Environment;
 use crate::envfile::EnvFileError;
@@ -43,7 +44,7 @@ pub enum LoadError {
   Override { config: String, script: String, discriminant: String },
 
   #[error(transparent)]
-  Inherit(#[from] InheritError),
+  Compose(#[from] ComposeError),
 
   #[error(transparent)]
   EnvFile(#[from] EnvFileError),
@@ -72,6 +73,11 @@ impl Loaded {
   /// What `name` resolves to, or `None` when no config in scope defines it.
   pub fn resolve(&self, name: &str, scope: Scope) -> Result<Option<Resolved<'_>>, InheritError> {
     inherit::resolve(&self.layers, name, scope)
+  }
+
+  /// Everything running `name` would run, in order, or `None` when nothing defines it.
+  pub fn plan(&self, name: &str, scope: Scope) -> Result<Option<Plan>, ComposeError> {
+    compose::plan(&self.layers, name, scope)
   }
 
   /// Every script name in scope, sorted and without duplicates.
@@ -124,14 +130,10 @@ impl Loaded {
     Ok(())
   }
 
-  /// Every name resolves, so a cycle or a missing target is found now rather than by
-  /// whoever happens to run that one script first.
-  fn check_resolution(&self) -> Result<(), LoadError> {
-    for name in self.names(Scope::Nearest) {
-      self.resolve(name, Scope::Nearest)?;
-    }
-
-    Ok(())
+  /// Every name plans, so a cycle, a missing target or a missing member is found now
+  /// rather than by whoever happens to run that one script first.
+  fn check_composition(&self) -> Result<(), LoadError> {
+    Ok(compose::validate(&self.layers, Scope::Nearest)?)
   }
 }
 
@@ -155,6 +157,7 @@ fn discriminant_of(kind: &Kind) -> &'static str {
   match kind {
     Kind::Command(_) => "command",
     Kind::Extends { .. } => "extends",
+    Kind::Serial { .. } => "serial",
   }
 }
 
@@ -184,7 +187,7 @@ pub fn load(start: &Path, environment: &Environment) -> Result<Loaded, LoadError
 
   let loaded = Loaded { discovered, layers };
   loaded.check_overrides()?;
-  loaded.check_resolution()?;
+  loaded.check_composition()?;
 
   Ok(loaded)
 }

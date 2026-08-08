@@ -1,0 +1,10 @@
+---
+source: crates/rune-config/tests/composition.rs
+description: a circle closed through dependsOn
+expression: error
+---
+scripts run in a circle:
+
+  build → ci → build
+
+a script cannot be part of what has to finish before it starts.

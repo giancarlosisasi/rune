@@ -1,0 +1,10 @@
+---
+source: crates/rune-config/tests/composition.rs
+description: two groups naming each other
+expression: error
+---
+scripts run in a circle:
+
+  a → b → a
+
+a script cannot be part of what has to finish before it starts.

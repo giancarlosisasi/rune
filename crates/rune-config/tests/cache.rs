@@ -41,7 +41,7 @@ fn command_with(dir: &Path, environment: &Environment) -> String {
   let resolved =
     loaded.resolve("test", Scope::Nearest).expect("resolves").expect("`test` is defined");
 
-  resolved.command.select(PLATFORM).to_owned()
+  resolved.command().expect("`test` runs a command").select(PLATFORM).to_owned()
 }
 
 /// What `test` resolves to from `dir`: the base command, and everything appended to it.
@@ -50,7 +50,10 @@ fn resolution(dir: &Path) -> (String, Vec<String>) {
   let resolved =
     loaded.resolve("test", Scope::Nearest).expect("resolves").expect("`test` is defined");
 
-  (resolved.command.select(PLATFORM).to_owned(), resolved.append_args.clone())
+  (
+    resolved.command().expect("`test` runs a command").select(PLATFORM).to_owned(),
+    resolved.append_args.clone(),
+  )
 }
 
 fn cache_dir(dir: &Path) -> PathBuf {

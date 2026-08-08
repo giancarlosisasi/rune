@@ -25,6 +25,14 @@ where
     .map(|(_, defined)| defined)
 }
 
+/// The suggestion as an error message renders it, or nothing at all.
+///
+/// Every message that can carry a suggestion prints it the same way, so a user meets one
+/// phrasing whether the name was missed in `run`, in `extends`, or in a group.
+pub fn did_you_mean(suggestion: Option<&str>) -> String {
+  suggestion.map_or_else(String::new, |name| format!("\n\ndid you mean `{name}`?"))
+}
+
 #[cfg(test)]
 mod tests {
   use super::closest;

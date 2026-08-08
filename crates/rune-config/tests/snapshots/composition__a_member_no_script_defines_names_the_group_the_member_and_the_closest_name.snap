@@ -1,0 +1,8 @@
+---
+source: crates/rune-config/tests/composition.rs
+description: a group member no script defines
+expression: error
+---
+script `ci` names `tset` as a member, which no script defines
+
+did you mean `test`?

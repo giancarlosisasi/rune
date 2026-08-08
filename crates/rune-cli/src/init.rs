@@ -31,10 +31,18 @@ const SEEDED_INTRO: &str = r"// Scripts for this repository, taken from package.
 /// This is the part that dates. A change that adds a field to the schema decides here
 /// whether a new user should be shown it.
 const GUIDE: &str = r#"//
-// A script either runs a `command` of its own, or `extends` another one and adds to it:
+// A script runs a `command` of its own, `extends` another one and adds to it, or runs
+// several others in `serial`:
 //
 //   build:    { command: "tsc -b" }
 //   build:ci: { extends: "build", appendArgs: ["--force"] }
+//   ci:       { serial: ["lint", "build:ci", "test"] }
+//
+// A group stops at the first member that fails and exits with that member's code; add
+// `continueOnError: true` to run the rest anyway. `dependsOn` puts other scripts before
+// a command of its own:
+//
+//   build: { command: "tsc -b", dependsOn: ["clean"] }
 //
 // A `command` may instead name one per operating system, with a `default` for the rest:
 //
