@@ -10,14 +10,26 @@
 //!   every operating system. Windows needs the extension to consider a file executable;
 //!   Unix treats it as an ordinary part of the name.
 //! - Anything a test must synchronize on is announced with the `READY` token on stdout.
-//!   No test in this project waits by sleeping.
+//!   Nothing here waits on a clock, with the single exception documented on [`SETTLE`].
 
 use std::io::{self, BufRead as _, IsTerminal as _, Write as _};
 use std::path::PathBuf;
 use std::process::{Command, ExitCode, Stdio};
+use std::time::Duration;
 
 /// Printed by every subcommand that then blocks, so a test can act instead of wait.
 const READY: &str = "READY";
+
+/// How long [`after`] keeps running once the process it waits for has gone.
+///
+/// A test about the order of two exits needs them far enough apart that nothing can
+/// report them the other way round. rune learns that a child has gone from its async
+/// runtime rather than from the operating system, and the two answers do not arrive in
+/// the same instant: exits a microsecond apart can reach rune in either order. Nothing
+/// out here can watch rune's own bookkeeping and wait for it, so the margin is put
+/// between the exits instead. It is generous because it is paid twice in the whole
+/// suite, and a margin that is sometimes too small is worth nothing at all.
+const SETTLE: Duration = Duration::from_millis(250);
 
 fn main() -> ExitCode {
   let arguments: Vec<String> = std::env::args().skip(1).collect();
@@ -257,7 +269,8 @@ fn wait_for(arguments: &[&str]) -> ExitCode {
   exit_code(Some(code))
 }
 
-/// Blocks until the process that wrote a marker has gone, then exits with a chosen code.
+/// Blocks until the process that wrote a marker has gone, waits out [`SETTLE`], then exits
+/// with a chosen code.
 ///
 /// This is what makes "this member exits before that one" a fact rather than a race.
 fn after(arguments: &[&str]) -> ExitCode {
@@ -272,6 +285,7 @@ fn after(arguments: &[&str]) -> ExitCode {
       && let Some(pid) = report["pid"].as_u64().and_then(|pid| u32::try_from(pid).ok())
       && !rune_exec::teardown::is_running(pid)
     {
+      std::thread::sleep(SETTLE);
       return exit_code(Some(code));
     }
 
