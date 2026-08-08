@@ -54,6 +54,11 @@ jobs:
       # release does not depend on npm's lifecycle behaviour staying what it is today.
       - run: node npm/scripts/bump-version.js
 
+      # `Cargo.toml` moved, and the lockfile records the workspace crates' own versions
+      # beside every dependency's. `--workspace` limits the update to those entries: a
+      # release must never quietly move a dependency, and a plain `cargo update` would.
+      - run: cargo update --workspace
+
       - name: write the changelog
         env:
           VERSION: ${{ inputs.version }}
