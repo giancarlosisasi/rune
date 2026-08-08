@@ -52,6 +52,12 @@ bench:
 release-rehearsal: dist smoke
   node npm/scripts/rehearse.js
 
+# Create the registry entry for any package the platform table names that does not exist
+# yet. Needs a publish token, and is only ever needed before a name's first real release
+# because npm will not configure a trusted publisher for a package that is not there
+bootstrap-registry *args:
+  node npm/scripts/bootstrap-registry.js {{args}}
+
 # Serve the documentation site with hot reload
 docs:
   pnpm --filter rune-website dev

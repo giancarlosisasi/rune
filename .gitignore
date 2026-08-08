@@ -2,3 +2,5 @@ node_modules
 cjs
 dist
 /target
+# A project-level npm token would otherwise be one `git add -A` away from being committed.
+.npmrc
