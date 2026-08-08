@@ -8,9 +8,12 @@
 // create it is a person with a token.
 //
 // What gets published is a placeholder at 0.0.0 under the `bootstrap` dist-tag: a
-// manifest and a README, no binary, no `bin`, nothing that resolves. It is never
-// installed — the meta package pins exact versions — and `latest` is left unset so
-// nothing can pick it up by accident.
+// manifest and a README, no binary, no `bin`, nothing that resolves.
+//
+// `--tag bootstrap` does not keep `latest` empty. npm points `latest` at the first version
+// of a new package whatever tag is asked for, so 0.0.0 holds `latest` until the first real
+// release moves it. What that buys is time, not safety: install the placeholder and you get
+// a manifest that does nothing, rather than a broken binary.
 //
 // This is also what runs when a seventh platform package is added.
 
