@@ -9,7 +9,7 @@
 //!
 //! This lived as four near-identical copies until all four failed on macOS at once.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 /// Replaces every spelling of `dir` with `[TMP]`, then writes what is left with forward
 /// slashes so one snapshot serves every platform.
@@ -19,15 +19,66 @@ pub fn redact(dir: &Path, text: &str) -> String {
     spellings.push(resolved);
   }
 
-  let mut redacted = text.to_owned();
-  for spelling in spellings {
-    let native = spelling.to_string_lossy().into_owned();
+  replace_each(&spellings, text)
+}
 
-    redacted = redacted.replace(&native, "[TMP]");
-    // A message may carry a path rune assembled itself, with the separators already
-    // turned round.
-    redacted = redacted.replace(&native.replace('\\', "/"), "[TMP]");
+/// Longest spelling first, and that ordering is the whole of the correctness here.
+///
+/// On macOS one spelling *contains* the other: `/var/folders/x` resolves to
+/// `/private/var/folders/x`. Replace the short one first and the long one is left as
+/// `/private[TMP]`, which is neither the path nor the placeholder.
+fn replace_each(spellings: &[PathBuf], text: &str) -> String {
+  let mut forms: Vec<String> = spellings
+    .iter()
+    .flat_map(|path| {
+      let native = path.to_string_lossy().into_owned();
+      // A message may carry a path rune assembled itself, with the separators already
+      // turned round.
+      let slashed = native.replace('\\', "/");
+      [native, slashed]
+    })
+    .collect();
+
+  forms.sort_by(|left, right| right.len().cmp(&left.len()).then_with(|| left.cmp(right)));
+  forms.dedup();
+
+  let mut redacted = text.to_owned();
+  for form in forms {
+    redacted = redacted.replace(&form, "[TMP]");
   }
 
   redacted.replace('\\', "/")
+}
+
+/// The macOS case, written out so the ordering rule cannot be lost again. Both spellings
+/// are supplied directly: what the filesystem would resolve to is not reachable from a
+/// test that has to give the same answer on every platform.
+#[test]
+fn a_spelling_that_contains_another_is_still_replaced_whole() {
+  let spellings = [
+    PathBuf::from("/var/folders/df/T/.tmpAbCd"),
+    PathBuf::from("/private/var/folders/df/T/.tmpAbCd"),
+  ];
+
+  let redacted = replace_each(
+    &spellings,
+    "cannot find `./nope` imported from /private/var/folders/df/T/.tmpAbCd/rune.config.ts",
+  );
+
+  assert_eq!(redacted, "cannot find `./nope` imported from [TMP]/rune.config.ts");
+}
+
+/// The other direction: a message carrying the spelling the test was handed, not the one
+/// the filesystem resolved it to.
+#[test]
+fn either_spelling_on_its_own_is_replaced() {
+  let spellings = [
+    PathBuf::from("/var/folders/df/T/.tmpAbCd"),
+    PathBuf::from("/private/var/folders/df/T/.tmpAbCd"),
+  ];
+
+  assert_eq!(
+    replace_each(&spellings, "/var/folders/df/T/.tmpAbCd/rune.config.ts"),
+    "[TMP]/rune.config.ts"
+  );
 }
