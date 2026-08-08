@@ -54,6 +54,24 @@ pub fn binary() -> PathBuf {
   PathBuf::from(env!("CARGO_BIN_EXE_rune"))
 }
 
+/// A path spelled the way the filesystem spells it.
+///
+/// A temporary directory is reached through a symlink on macOS — `/var/folders/…`
+/// resolving to `/private/var/folders/…` — and a Windows runner hands out `TEMP` as an
+/// 8.3 short name. Two spellings of one directory compare unequal as strings, so both
+/// sides go through this before they meet.
+pub fn canonical(path: &Path) -> PathBuf {
+  std::fs::canonicalize(path).unwrap_or_else(|_| path.to_owned())
+}
+
+/// Asserts that a path rune reported is the directory the test meant, whichever spelling
+/// each of them used.
+pub fn assert_same_path(reported: Option<&str>, expected: &Path, what: &str) {
+  let reported = reported.map(|value| canonical(Path::new(value)));
+
+  assert_eq!(reported.as_deref(), Some(canonical(expected).as_path()), "{what}");
+}
+
 /// The fixture binary the tests spawn as a child.
 ///
 /// Cargo only exports `CARGO_BIN_EXE_*` for binaries of the crate under test, so it is

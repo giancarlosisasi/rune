@@ -1,9 +1,11 @@
 //! Evaluating a `rune.config.ts`: relative imports, the specifier forms that must all
 //! reach the same file, and the imports that must be refused.
 
-use std::fs;
-use std::path::Path;
+mod paths;
 
+use std::fs;
+
+use paths::redact;
 use rune_config::env::Environment;
 use rune_config::eval::evaluate_config;
 use tempfile::TempDir;
@@ -20,14 +22,6 @@ fn fixture(files: &[(&str, &str)]) -> TempDir {
 }
 
 /// Replaces the tempdir path so a snapshot does not encode where the test ran.
-fn redact(dir: &Path, text: &str) -> String {
-  let root = dunce::canonicalize(dir).expect("canonicalize tempdir");
-  text
-    .replace(&root.to_string_lossy().replace('\\', "/"), "[TMP]")
-    .replace(&root.to_string_lossy().to_string(), "[TMP]")
-    .replace('\\', "/")
-}
-
 /// Test 2.2 — the headline of this change: a config is allowed to be more than one file.
 #[test]
 fn helper_import_is_inlined_into_the_command() {

@@ -4,9 +4,11 @@
 //! rejection is only useful if it happens when a user loads their config, and the path
 //! from a file on disk to a message is what a user actually meets.
 
-use std::fs;
-use std::path::Path;
+mod paths;
 
+use std::fs;
+
+use paths::redact;
 use rune_config::env::Environment;
 use rune_config::load::load;
 use tempfile::TempDir;
@@ -17,12 +19,6 @@ fn repo(config: &str) -> TempDir {
   fs::write(dir.path().join(".git/HEAD"), "ref: refs/heads/main\n").expect("write the boundary");
   fs::write(dir.path().join("rune.config.ts"), config).expect("write the config");
   dir
-}
-
-/// Keeps the tempdir out of the snapshot.
-fn redact(dir: &Path, text: &str) -> String {
-  let root = dunce::canonicalize(dir).expect("canonicalize tempdir");
-  text.replace(&root.to_string_lossy().to_string(), "[TMP]").replace('\\', "/")
 }
 
 fn rejection(config: &str) -> String {

@@ -7,7 +7,7 @@
 
 mod harness;
 
-use harness::Test;
+use harness::{Test, assert_same_path};
 
 /// The fake tool every fixture calls, so the environment is read out of a real child
 /// rather than out of rune's own idea of what it built.
@@ -106,7 +106,7 @@ fn the_rune_prefix_is_refused_from_a_file_and_from_an_env_map() {
   let env = env_of(&output);
 
   assert_eq!(env["RUNE_SCRIPT_NAME"], "probe", "rune's own value must survive");
-  assert_eq!(env["RUNE_ROOT"].as_str(), root.to_str(), "rune's own value must survive");
+  assert_same_path(env["RUNE_ROOT"].as_str(), &root, "rune's own value must survive");
 
   insta::with_settings!({ description => "the reserved prefix, attempted from both sources" }, {
     insta::assert_snapshot!(stderr_of(&output));

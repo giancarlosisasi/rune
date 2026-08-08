@@ -5,9 +5,11 @@
 //! *is* the deliverable: inheritance is the first feature that makes resolution
 //! non-obvious, and a confusing explanation is as severe a defect as a wrong result.
 
-use std::fs;
-use std::path::Path;
+mod paths;
 
+use std::fs;
+
+use paths::redact;
 use rune_config::env::Environment;
 use rune_config::load::load;
 use tempfile::TempDir;
@@ -25,12 +27,6 @@ fn repo(files: &[(&str, &str)]) -> TempDir {
   }
 
   dir
-}
-
-/// Keeps the tempdir out of the snapshot.
-fn redact(dir: &Path, text: &str) -> String {
-  let root = dunce::canonicalize(dir).expect("canonicalize tempdir");
-  text.replace(&root.to_string_lossy().to_string(), "[TMP]").replace('\\', "/")
 }
 
 fn config(scripts: &str) -> String {
