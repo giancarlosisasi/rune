@@ -14,7 +14,14 @@ const path = require('node:path');
 const test = require('node:test');
 
 const platforms = require('../rune/lib/platforms');
-const { PACKED, assemblePlatform, packRelease, version } = require('../scripts/dist');
+const {
+  PACKED,
+  assemblePlatform,
+  packRelease,
+  tarballName,
+  tarballSpec,
+  version,
+} = require('../scripts/dist');
 
 const WINDOWS = process.platform === 'win32';
 
@@ -86,4 +93,24 @@ test('what was packed is written down beside the tarballs', (t) => {
       `${one.name} names a tarball that is not there`,
     );
   }
+});
+
+// The release workflow passes a relative directory. Joined rather than resolved, the
+// result reads as the GitHub shorthand `owner/repo` and npm goes looking for a repository
+// instead of opening the file.
+test('a tarball is named to npm as a path, never as a repository', () => {
+  const spec = tarballSpec('tarballs', 'gio-labs-rune-0.1.1.tgz');
+
+  assert.ok(path.isAbsolute(spec), `npm would read ${spec} as a package name`);
+  assert.equal(path.basename(spec), 'gio-labs-rune-0.1.1.tgz');
+});
+
+// Two npm majors are in play: the one the release runners carry and the one a maintainer
+// has installed. They report a pack differently and the packaging must not care.
+test('the packed tarball is found in what either npm reports', () => {
+  const record = { filename: 'gio-labs-rune-0.1.1.tgz' };
+
+  assert.equal(tarballName([record]), record.filename, 'npm 11 reports an array');
+  assert.equal(tarballName({ '@gio-labs/rune': record }), record.filename, 'npm 12 reports an object');
+  assert.throws(() => tarballName([]), /reported no tarball/);
 });
