@@ -5,17 +5,17 @@ description: 'The six platform packages, the Linux musl decision, Windows arm64 
 
 # Platforms
 
-Rune ships one native binary per platform. The meta package `@giancarlosio/rune` lists all six as
+Rune ships one native binary per platform. The meta package `@gio-labs/rune` lists all six as
 exact-pinned optional dependencies, and the package manager installs the one that matches.
 
 | Platform | Package | Target triple |
 | --- | --- | --- |
-| Windows x64 | `@giancarlosio/rune-win32-x64` | `x86_64-pc-windows-msvc` |
-| Windows arm64 | `@giancarlosio/rune-win32-arm64` | `x86_64-pc-windows-msvc`, run under emulation |
-| macOS x64 | `@giancarlosio/rune-darwin-x64` | `x86_64-apple-darwin` |
-| macOS arm64 | `@giancarlosio/rune-darwin-arm64` | `aarch64-apple-darwin` |
-| Linux x64 | `@giancarlosio/rune-linux-x64` | `x86_64-unknown-linux-musl` |
-| Linux arm64 | `@giancarlosio/rune-linux-arm64` | `aarch64-unknown-linux-musl` |
+| Windows x64 | `@gio-labs/rune-win32-x64` | `x86_64-pc-windows-msvc` |
+| Windows arm64 | `@gio-labs/rune-win32-arm64` | `x86_64-pc-windows-msvc`, run under emulation |
+| macOS x64 | `@gio-labs/rune-darwin-x64` | `x86_64-apple-darwin` |
+| macOS arm64 | `@gio-labs/rune-darwin-arm64` | `aarch64-apple-darwin` |
+| Linux x64 | `@gio-labs/rune-linux-x64` | `x86_64-unknown-linux-musl` |
+| Linux arm64 | `@gio-labs/rune-linux-arm64` | `aarch64-unknown-linux-musl` |
 
 Tested floors: Windows 10, macOS 10.15 on x64 and macOS 11 on arm64, any Linux distribution.
 

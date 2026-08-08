@@ -15,7 +15,7 @@ const WORKSPACE = path.join(__dirname, '..', '..');
 const TSC = require.resolve('typescript/bin/tsc');
 
 // A directory with the meta package installed under node_modules, holding the fixture
-// files a case needs. tsc has to resolve `@giancarlosio/rune` through that package's own
+// files a case needs. tsc has to resolve `@gio-labs/rune` through that package's own
 // manifest: pointing it straight at the file in this repository would prove the file
 // compiles and nothing about whether the published package leads anyone to it.
 function project(files) {
@@ -45,7 +45,7 @@ test('an illegal combination that stops being illegal fails the suite', () => {
   fs.writeFileSync(
     path.join(root, 'illegal.ts'),
     [
-      "import type { Script } from '@giancarlosio/rune';",
+      "import type { Script } from '@gio-labs/rune';",
       '// @ts-expect-error this line is perfectly legal',
       "export const legal: Script = { command: 'tsc -b' };",
       '',

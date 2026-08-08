@@ -5,7 +5,7 @@
 //! answers it instead, which is what lets one file typecheck in an editor and load here.
 
 /// The specifier a config imports `defineConfig` from.
-pub const MODULE: &str = "@giancarlosio/rune";
+pub const MODULE: &str = "@gio-labs/rune";
 
 /// What that import evaluates to.
 ///
@@ -25,9 +25,9 @@ mod tests {
 
   #[test]
   fn only_the_exact_specifier_is_supplied() {
-    assert!(is_builtin("@giancarlosio/rune"));
-    assert!(!is_builtin("@giancarlosio/rune-linux-x64"));
-    assert!(!is_builtin("@giancarlosio/rune/extra"));
+    assert!(is_builtin("@gio-labs/rune"));
+    assert!(!is_builtin("@gio-labs/rune-linux-x64"));
+    assert!(!is_builtin("@gio-labs/rune/extra"));
     assert!(!is_builtin("rune"));
   }
 }

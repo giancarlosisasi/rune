@@ -14,7 +14,7 @@
 // is built, not what it is for; encoding it would make shipping a glibc build later a
 // breaking rename.
 
-const SCOPE = '@giancarlosio';
+const SCOPE = '@gio-labs';
 const REPOSITORY = 'https://github.com/giancarlosisasi/rune';
 
 // Where the executable sits inside a platform package. The wrapper resolves this path;

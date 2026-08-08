@@ -1,6 +1,6 @@
 [
   {
-    "name": "@giancarlosio/rune-win32-x64",
+    "name": "@gio-labs/rune-win32-x64",
     "version": "1.2.3",
     "description": "The rune binary for win32 x64.",
     "homepage": "https://github.com/giancarlosisasi/rune",
@@ -21,7 +21,7 @@
     }
   },
   {
-    "name": "@giancarlosio/rune-win32-arm64",
+    "name": "@gio-labs/rune-win32-arm64",
     "version": "1.2.3",
     "description": "The rune binary for win32 arm64.",
     "homepage": "https://github.com/giancarlosisasi/rune",
@@ -42,7 +42,7 @@
     }
   },
   {
-    "name": "@giancarlosio/rune-darwin-x64",
+    "name": "@gio-labs/rune-darwin-x64",
     "version": "1.2.3",
     "description": "The rune binary for darwin x64.",
     "homepage": "https://github.com/giancarlosisasi/rune",
@@ -63,7 +63,7 @@
     }
   },
   {
-    "name": "@giancarlosio/rune-darwin-arm64",
+    "name": "@gio-labs/rune-darwin-arm64",
     "version": "1.2.3",
     "description": "The rune binary for darwin arm64.",
     "homepage": "https://github.com/giancarlosisasi/rune",
@@ -84,7 +84,7 @@
     }
   },
   {
-    "name": "@giancarlosio/rune-linux-x64",
+    "name": "@gio-labs/rune-linux-x64",
     "version": "1.2.3",
     "description": "The rune binary for linux x64.",
     "homepage": "https://github.com/giancarlosisasi/rune",
@@ -105,7 +105,7 @@
     }
   },
   {
-    "name": "@giancarlosio/rune-linux-arm64",
+    "name": "@gio-labs/rune-linux-arm64",
     "version": "1.2.3",
     "description": "The rune binary for linux arm64.",
     "homepage": "https://github.com/giancarlosisasi/rune",

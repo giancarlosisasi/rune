@@ -104,7 +104,7 @@ export interface RuneConfig {
  * Types a config without naming the type.
  *
  * ```ts
- * import { defineConfig } from '@giancarlosio/rune';
+ * import { defineConfig } from '@gio-labs/rune';
  *
  * export default defineConfig({
  *   scripts: {

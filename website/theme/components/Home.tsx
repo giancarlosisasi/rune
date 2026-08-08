@@ -22,7 +22,7 @@ export function HomeIntro() {
         <div className="rune-panel rune-panel--wide">
           <div className="rune-panel__title">install</div>
           <pre className="rune-panel__body">
-            <code>pnpm add -D @giancarlosio/rune</code>
+            <code>pnpm add -D @gio-labs/rune</code>
           </pre>
         </div>
 
@@ -37,7 +37,7 @@ export function HomeIntro() {
             <div className="rune-panel__title">rune.config.ts</div>
             <pre className="rune-panel__body">
               <code>
-                {`import { defineConfig } from '@giancarlosio/rune'\n\n`}
+                {`import { defineConfig } from '@gio-labs/rune'\n\n`}
                 <K>export default</K>
                 {` defineConfig({\n  scripts: {\n    test: {\n      command: `}
                 <S>{`'vitest run --coverage --reporter=dot'`}</S>
