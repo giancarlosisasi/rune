@@ -1,6 +1,13 @@
 # Changelog
 
 Every notable change to rune.
+## 0.1.3 — 2026-08-09
+
+
+### Added
+
+- Improve cwd and argument handling
+
 ## 0.1.2 — 2026-08-09
 
 
