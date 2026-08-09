@@ -92,10 +92,11 @@ fn define_config_is_supplied_by_the_binary_rather_than_by_node_modules() {
   assert_eq!(config["scripts"]["dev"]["command"], "vite");
 }
 
-/// A config that reaches for anything else in that package is told so, rather than being
-/// handed an undefined value that fails somewhere further along.
+/// A config that reaches for anything beyond `defineConfig` and `rune` is told so, rather
+/// than being handed an undefined value that fails somewhere further along. Widening the
+/// module to carry the environment object must not widen it to carry everything.
 #[test]
-fn the_supplied_module_offers_define_config_and_nothing_else() {
+fn the_supplied_module_offers_nothing_beyond_define_config_and_rune() {
   let dir = fixture(&[(
     "rune.config.ts",
     "import { somethingElse } from '@gio-labs/rune';\n\
@@ -210,10 +211,11 @@ fn both_path_separators_reach_one_module_instance() {
 
 /// Test 2.8 — the three things a config is allowed to know about its machine.
 #[test]
-fn the_rune_global_reports_the_environment() {
+fn the_imported_rune_object_reports_the_environment() {
   let dir = fixture(&[(
     "rune.config.ts",
-    "export default { platform: rune.platform, isCI: rune.isCI, token: rune.env.MY_TOKEN };\n",
+    "import { rune } from '@gio-labs/rune';\n\
+     export default { platform: rune.platform, isCI: rune.isCI, token: rune.env.MY_TOKEN };\n",
   )]);
   let environment = Environment::from_pairs([("CI", "1"), ("MY_TOKEN", "abc123")]);
 
@@ -236,7 +238,11 @@ fn the_rune_global_reports_the_environment() {
 /// whole environment would miss the cache on every unrelated change.
 #[test]
 fn only_the_variables_the_config_read_are_observed() {
-  let dir = fixture(&[("rune.config.ts", "export default { a: rune.env.WANTED };\n")]);
+  let dir = fixture(&[(
+    "rune.config.ts",
+    "import { rune } from '@gio-labs/rune';\n\
+     export default { a: rune.env.WANTED };\n",
+  )]);
   let environment = Environment::from_pairs([("WANTED", "yes"), ("IGNORED", "no")]);
 
   let evaluated =
@@ -247,10 +253,11 @@ fn only_the_variables_the_config_read_are_observed() {
 
 /// Test 2.9 — the spec says frozen; this is what frozen has to mean in practice.
 #[test]
-fn the_rune_global_cannot_be_reassigned() {
+fn the_imported_rune_object_cannot_be_reassigned() {
   let dir = fixture(&[(
     "rune.config.ts",
-    "try { (rune as any).platform = 'hacked'; } catch (_) {}\n\
+    "import { rune } from '@gio-labs/rune';\n\
+     try { (rune as any).platform = 'hacked'; } catch (_) {}\n\
      try { (rune as any).env.CI = 'hacked'; } catch (_) {}\n\
      export default { platform: rune.platform, ci: rune.env.CI };\n",
   )]);
@@ -262,6 +269,48 @@ fn the_rune_global_cannot_be_reassigned() {
 
   assert_ne!(config["platform"], "hacked");
   assert_eq!(config["ci"], "real");
+}
+
+/// Test 2.9b — a helper module is where most environment reads actually live, because
+/// that is where the repeated fragments get factored to. The supplied module has to be
+/// importable from any file in the graph, not only from the entry config.
+#[test]
+fn a_relative_import_can_read_the_environment_too() {
+  let dir = fixture(&[
+    (
+      "scripts/helpers.ts",
+      "import { rune } from '@gio-labs/rune';\n\
+       export const reporter = rune.isCI ? 'github' : 'pretty';\n",
+    ),
+    (
+      "rune.config.ts",
+      "import { reporter } from './scripts/helpers';\n\
+       export default { reporter };\n",
+    ),
+  ]);
+  let environment = Environment::from_pairs([("CI", "1")]);
+
+  let evaluated =
+    evaluate_config(&dir.path().join("rune.config.ts"), &environment).expect("config evaluates");
+
+  assert_eq!(evaluated.value["reporter"], "github");
+}
+
+/// Test 2.9a — the upgrade path for every config written against the old global. Reading
+/// the bare name has to say what to write instead, not `rune is not defined`.
+#[test]
+fn reading_rune_without_importing_it_names_the_import() {
+  let dir = fixture(&[("rune.config.ts", "export default { platform: rune.platform };\n")]);
+
+  let error = evaluate_config(&dir.path().join("rune.config.ts"), &Environment::default())
+    .unwrap_err()
+    .to_string();
+
+  assert!(error.contains("rune"), "the unavailable name is not reported:\n{error}");
+  assert!(
+    error.contains("import { rune } from \"@gio-labs/rune\""),
+    "the message does not show the import that replaces the global:\n{error}"
+  );
 }
 
 /// Test 2.7 — a bare `ReferenceError` would be correct and useless. The message has to
@@ -277,6 +326,10 @@ fn node_apis_fail_with_a_message_listing_what_is_available() {
 
     assert!(error.contains(api), "`{api}` is not named:\n{error}");
     assert!(error.contains("rune.env"), "`{api}` does not list what works:\n{error}");
+    assert!(
+      error.contains("import { rune } from \"@gio-labs/rune\""),
+      "`{api}` lists the environment object without the import that provides it:\n{error}"
+    );
   }
 }
 

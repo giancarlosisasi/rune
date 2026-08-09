@@ -51,7 +51,14 @@ const GUIDE: &str = r#"//
 // Any script may add `description`, `cwd`, `env` and `envFile`.
 //
 // This file is TypeScript: variables, template strings and relative imports all work.
-// `rune.env`, `rune.platform` and `rune.isCI` are available. Node globals are not.
+// Node globals are not available. To branch on the machine or the environment, import
+// what rune supplies:
+//
+//   import { rune } from "@gio-labs/rune";
+//
+//   test: { command: rune.isCI ? "vitest --run" : "vitest" }
+//
+// That gives `rune.env`, `rune.platform` and `rune.isCI`.
 "#;
 
 /// One script in the file being generated.

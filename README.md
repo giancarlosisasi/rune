@@ -82,6 +82,8 @@ The config is real TypeScript, evaluated before any script runs. Types are strip
 is run in an embedded JavaScript engine, so a command can be computed instead of written out.
 
 ```ts
+import { rune } from '@gio-labs/rune';
+
 const port = process.env.CI ? 4000 : 3000;   // ✗ there is no `process`
 const port = rune.isCI ? 4000 : 3000;        // ✓
 ```
@@ -92,6 +94,9 @@ const port = rune.isCI ? 4000 : 3000;        // ✓
 | `rune.env` | The environment rune was invoked with, read-only |
 | `rune.isCI` | Whether `CI` is set |
 | Relative imports | `./scripts/helpers.ts` and anything it imports, TypeScript included |
+
+`rune` is an export of `@gio-labs/rune`, so the published types cover it and the import works in
+any file the config pulls in.
 
 Bare imports of npm packages do not resolve: the engine is not Node, and a config that needed
 `node_modules` would make loading a config as slow as the scripts it describes. Everything a

@@ -29,7 +29,7 @@ build: {
 | --- | --- |
 | `npm_config_script_shell` | The shell every command is spawned through. Arrives automatically when Rune runs from a package-manager script |
 | `PATH` | The base that `node_modules/.bin` directories are prepended to |
-| `CI` | Decides `rune.isCI` in a config. Any value other than empty, `0` or `false` counts as CI |
+| `CI` | Decides `rune.isCI` in a config, once `rune` is imported. Any value other than empty, `0` or `false` counts as CI |
 | `NO_COLOR` | Any value turns off colour in Rune's own prefixes |
 | `FORCE_COLOR` | Forwarded to piped members of a parallel group, so their colour survives the pipe. A value already set wins |
 | `RUNE_BINARY_PATH` | Points the npm wrapper at a specific native binary instead of resolving one |
@@ -37,9 +37,11 @@ build: {
 ## Read by a config
 
 A config sees the process environment through `rune.env`, and every read is recorded so it enters
-the cache key.
+the cache key. Import the object first — it is an export of the package Rune supplies, not a global.
 
 ```ts
+import { rune } from '@gio-labs/rune';
+
 const registry = rune.env.NPM_REGISTRY ?? 'https://registry.npmjs.org';
 ```
 

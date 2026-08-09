@@ -183,7 +183,8 @@ fn is_ci_invalidates_the_cache_like_any_other_variable() {
     ),
     (
       "rune.config.ts",
-      "export default { scripts: { test: { command: rune.isCI ? 'vitest --run' : 'vitest' } } };
+      "import { rune } from '@gio-labs/rune';
+export default { scripts: { test: { command: rune.isCI ? 'vitest --run' : 'vitest' } } };
 ",
     ),
   ]);

@@ -1,6 +1,6 @@
 ---
 title: 'Config evaluation'
-description: 'What a rune.config.ts may import and call, the frozen rune global, and how the resolved result is cached by import-graph content.'
+description: 'What a rune.config.ts may import and call, the frozen rune object it imports for the environment, and how the resolved result is cached by import-graph content.'
 ---
 
 # Config evaluation
@@ -15,7 +15,7 @@ TypeScript syntax is erased before evaluation. Annotations, interfaces and type 
 runtime effect, and constructs that do carry runtime meaning keep it.
 
 ```ts title="rune.config.ts"
-import { defineConfig } from '@gio-labs/rune';
+import { defineConfig, rune } from '@gio-labs/rune';
 import { PACKAGES } from './scripts/packages';
 
 const enum Reporter {
@@ -53,9 +53,14 @@ import shared from './shared';                   // shared/index.ts
 Forward slashes and platform separators resolve to the same file, so a Windows and a Linux machine
 produce the same result and share one cache entry.
 
-## The rune global
+## The rune object
 
-Configs get one ambient object, frozen.
+What a config is allowed to know about the machine it is read on. It is an export of the package
+Rune supplies, not a global, so the published types describe it and no declaration file is needed:
+
+```ts
+import { rune } from '@gio-labs/rune';
+```
 
 | Property | Type | Value |
 | --- | --- | --- |
@@ -63,11 +68,23 @@ Configs get one ambient object, frozen.
 | `rune.platform` | `'win32' \| 'darwin' \| 'linux'` | The running operating system, named as Node names it |
 | `rune.isCI` | `boolean` | `CI` is set to anything other than empty, `0` or `false` |
 
+The import works in any file in the graph, not only the entry config — which is where it is most
+useful, since shared fragments tend to live in a helper module:
+
+```ts title="scripts/helpers.ts"
+import { rune } from '@gio-labs/rune';
+
+export const reporter = rune.isCI ? ' --reporter=github' : '';
+```
+
 Reads are recorded. A variable the config actually read enters the cache key; an unrelated variable
 changing does not throw away a valid entry.
 
-Assignment to `rune` throws. The object is frozen, and `env` is a proxy that rejects writes, so a
-config cannot change what Rune resolves with by mutating the global.
+Assignment throws. The object is frozen, and `env` is a proxy that rejects writes, so a config
+cannot change what Rune resolves with by mutating it.
+
+Reading `rune` without importing it is an error that names the import, so a config written against
+an older version says what to add.
 
 ## What does not work
 
@@ -80,7 +97,7 @@ Error: `process` is not available in a rune config.
 rune evaluates this file with an embedded JavaScript engine, not Node.js, so Node globals and modules do not exist here.
 
 what does work:
-  - `rune.env`, `rune.platform`, `rune.isCI`
+  - `import { rune } from "@gio-labs/rune"` — then `rune.env`, `rune.platform`, `rune.isCI`
   - relative imports of other files in this repository, such as `./scripts/helpers.ts`
   - `import { defineConfig } from "@gio-labs/rune"` — the one package rune supplies itself
   - `import type` from any npm package — type-only imports are erased before evaluation

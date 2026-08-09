@@ -68,7 +68,10 @@ test('6a.12 — a config the published types accept is a config rune loads', () 
   const listed = spawnSync(runeBinary(), ['list'], { cwd: root, encoding: 'utf8' });
 
   assert.equal(listed.status, 0, `rune rejected a config tsc accepted:\n${listed.stderr}`);
-  for (const script of ['clean', 'build', 'build:ci', 'lint', 'test', 'dev', 'verify', 'watch']) {
+  // `environment` is the one that reads the imported `rune` object. Its presence here is
+  // what proves the same import satisfied tsc and the binary.
+  const scripts = ['environment', 'clean', 'build', 'build:ci', 'lint', 'test', 'dev', 'verify', 'watch'];
+  for (const script of scripts) {
     assert.match(listed.stdout, new RegExp(`\\b${script}\\b`));
   }
   remove(root);
