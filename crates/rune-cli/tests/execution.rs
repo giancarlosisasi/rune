@@ -122,24 +122,8 @@ fn the_default_working_directory_is_the_invoking_package() {
   assert_eq!(cwd_of(&output.stdout), expected);
 }
 
-#[test]
-fn a_relative_cwd_resolves_against_the_invoking_package() {
-  let script = format!(r#"{{ probe: {{ command: "{TOOL} report-env", cwd: "src" }} }}"#);
-
-  let test = Test::new()
-    .config(&config(&script))
-    .file("packages/foo/package.json", "{}\n")
-    .file("packages/foo/src/keep.txt", "")
-    .tool(&format!("node_modules/.bin/{TOOL}"))
-    .args(["run", "probe"])
-    .stdout_regex(r"(?s)^\{.*\}\n$")
-    .status(0);
-
-  let expected = canonical(&test.dir().join("packages/foo/src"));
-  let output = test.run_in("packages/foo");
-
-  assert_eq!(cwd_of(&output.stdout), expected);
-}
+// A relative `cwd` belongs to the config that declared it, which is a rule of its own and
+// is asserted in `working_directory.rs`.
 
 #[test]
 fn an_absolute_cwd_is_used_as_given() {

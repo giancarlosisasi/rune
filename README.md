@@ -118,11 +118,39 @@ Where a command genuinely differs per system, say so instead of branching:
 
 ```bash
 pnpm rune run build
-pnpm rune run test -- --watch    # everything after -- is appended to the command
+pnpm rune run test --watch       # everything after the name is appended to the command
+pnpm rune run --root test        # rune's own options come before the name
 ```
 
 The script gets the real terminal and rune exits with the child's code. Rune's own diagnostics go
 to stderr, so stdout belongs to the script.
+
+Everything after the script name belongs to the command, so a `package.json` script needs no
+separator:
+
+```json
+{ "scripts": { "test": "rune run test" } }
+```
+
+`npm test -- --watch` and `pnpm test -- --watch` both work. The package manager appends `--watch` to
+the command string, which is why the `--` never arrives and why nothing needs it to. Typing `--`
+yourself still works and is still the way to pass a value that would otherwise read as one of rune's
+own options: `rune run build -- --root`.
+
+### Calling rune on Windows
+
+`pnpm exec rune`, a `package.json` script, and Git Bash all hand your arguments to rune unchanged.
+
+Running `node_modules\.bin\rune.CMD` by hand does not. That file is a batch shim the package manager
+generated, and `cmd.exe` re-parses everything through it, so `&`, `^`, `|`, `<`, `>`, `(`, `)`, `%`
+and `!` in an argument change meaning before rune starts. This is true of every tool installed from
+npm, not of rune alone.
+
+Arguments rune passes **to** a tool are safe in the same situation. Nearly every tool in
+`node_modules/.bin` is a batch file that re-reads its own arguments, so rune escapes them for both
+readers when the command resolves to a `.cmd` or `.bat` file. The limit: a batch file that itself
+calls another batch file adds a third reader, and nothing rune does covers that. No runner in this
+ecosystem does.
 
 ## Commands
 

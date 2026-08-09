@@ -75,8 +75,16 @@ pub fn start(request: &ExecRequest<'_>, wiring: Wiring) -> Result<Spawned, ExecE
   }
 
   // Quoting can only happen once the shell is known: the same argument needs three
-  // different spellings depending on which of them is about to read the line.
-  let command_line = quote::command_line(request.command, request.arguments, shell.kind);
+  // different spellings depending on which of them is about to read the line. How many
+  // times it will be read is the child's business, and the child is found on the `PATH`
+  // the child itself will have.
+  let reads = quote::reads(
+    request.command,
+    shell.kind,
+    layering.environment.get("PATH"),
+    layering.environment.get("PATHEXT"),
+  );
+  let command_line = quote::command_line(request.command, request.arguments, shell.kind, reads);
 
   // A piped child is torn down as a unit because its siblings may fail; a timeout-bearing
   // child is torn down as a unit because it promised to end within a budget. Same need,
@@ -185,20 +193,23 @@ fn resolve_shell(
 
 /// Checked before spawning, because a missing directory otherwise surfaces as the same
 /// "not found" the operating system reports for a missing shell.
+///
+/// What is at the path decides the message. Forwarding the error kind reports "entity not
+/// found" for a path holding a perfectly real file, which tells the user the opposite of
+/// what is wrong.
 fn working_directory(request: &ExecRequest<'_>) -> Result<PathBuf, ExecError> {
-  let directory = match request.cwd {
-    Some(cwd) if cwd.is_absolute() => cwd.to_path_buf(),
-    Some(cwd) => request.package_dir.join(cwd),
-    None => request.package_dir.to_path_buf(),
-  };
-
+  let directory = request.directory.path;
   if directory.is_dir() {
-    return Ok(directory);
+    return Ok(directory.to_path_buf());
   }
 
-  Err(ExecError::WorkingDirectory {
-    script: request.script_name.to_owned(),
-    directory,
-    source: io::Error::from(io::ErrorKind::NotFound),
+  let script = request.script_name.to_owned();
+  let path = directory.display().to_string();
+  let config = request.directory.declared_in.map(str::to_owned);
+
+  Err(if directory.exists() {
+    ExecError::WorkingDirectoryIsAFile { script, path, config }
+  } else {
+    ExecError::WorkingDirectoryMissing { script, path, config }
   })
 }

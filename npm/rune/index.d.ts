@@ -27,7 +27,10 @@ type Forbid<Keys extends string> = { [Key in Keys]?: never };
 interface Common {
   /** One line, shown by `rune list`. */
   description?: string;
-  /** Where the command runs. Relative paths resolve against the invoking package. */
+  /**
+   * Where the command runs. A relative path resolves against this config file, the same
+   * way `envFile` does. Omit it and the command runs in the package it was invoked from.
+   */
   cwd?: string;
   /** Variables added to the environment. These override an `envFile`. */
   env?: Record<string, string>;

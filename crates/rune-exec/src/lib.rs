@@ -26,7 +26,7 @@ pub mod teardown;
 
 use std::collections::BTreeMap;
 use std::io;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::{ExitCode, ExitStatus};
 
 use thiserror::Error;
@@ -49,8 +49,9 @@ pub struct ExecRequest<'a> {
   /// The package the run started from. The default working directory, and the deepest
   /// `node_modules/.bin` on the child's `PATH`.
   pub package_dir: &'a Path,
-  /// A relative value resolves against `package_dir`; an absolute one is used as given.
-  pub cwd: Option<&'a Path>,
+  /// Where the command runs, already anchored. Interpreting a config is not this crate's
+  /// job; entering the directory it names is.
+  pub directory: Directory<'a>,
   pub env: &'a BTreeMap<String, String>,
   /// The script's dotenv files, nearest to the script first.
   pub env_files: &'a [FileLayer<'a>],
@@ -61,6 +62,19 @@ pub struct ExecRequest<'a> {
   pub interactive: bool,
   /// How long the script may run, how often it is retried, and how its tree is ended.
   pub lifecycle: Lifecycle,
+}
+
+/// The directory a command runs in, and who chose it.
+///
+/// The two travel together because the message for a directory that cannot be entered has
+/// to say where the value came from. "That path is wrong" is only useful beside "and this
+/// file is where it is written".
+#[derive(Debug, Clone, Copy)]
+pub struct Directory<'a> {
+  pub path: &'a Path,
+  /// The config that declared a `cwd`, spelled for a reader. `None` when no script in the
+  /// chain declared one and the directory is the package the run started from.
+  pub declared_in: Option<&'a str>,
 }
 
 impl ExecRequest<'_> {
@@ -92,14 +106,38 @@ pub enum ExecError {
   #[error("could not run the shell `{shell}`: {source}")]
   ShellNotRunnable { shell: String, source: io::Error },
 
-  #[error("cannot run `{script}` in {}: {source}", .directory.display())]
-  WorkingDirectory { script: String, directory: PathBuf, source: io::Error },
+  #[error(
+    "script `{script}` declares a cwd that does not exist\n\n  {path}{}\n\n\
+     create the directory, or correct `cwd`.",
+    declared_by(.config.as_deref())
+  )]
+  WorkingDirectoryMissing { script: String, path: String, config: Option<String> },
+
+  #[error(
+    "script `{script}` declares a cwd that is a file\n\n  {path}{}\n\n\
+     `cwd` names the directory the command runs in.",
+    declared_by(.config.as_deref())
+  )]
+  WorkingDirectoryIsAFile { script: String, path: String, config: Option<String> },
 
   #[error("could not wait for `{script}`: {source}")]
   Wait { script: String, source: io::Error },
 
   #[error("could not start the runner: {source}")]
   Runtime { source: io::Error },
+}
+
+/// The sentence that names where a `cwd` was written, when one was.
+///
+/// A script with no `cwd` runs in the package the run started from, and there is no file
+/// to send the reader to.
+fn declared_by(config: Option<&str>) -> String {
+  match config {
+    Some(config) => {
+      format!("\n\na `cwd` is resolved against the config that declares it, which is {config}.")
+    }
+    None => String::new(),
+  }
 }
 
 /// How a run finished.

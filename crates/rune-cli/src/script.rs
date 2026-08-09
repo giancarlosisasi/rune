@@ -5,11 +5,12 @@
 //! differently — the point of `inspect` is that it explains what `run` would do.
 
 use std::fmt::Write as _;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use rune_config::env::Environment;
-use rune_config::inherit::{Resolved, Scope};
+use rune_config::inherit::{Declared, Resolved, Scope};
 use rune_config::load::{Loaded, load};
+use rune_config::resolve::lexically_normalize;
 use rune_config::suggest::closest;
 use rune_exec::environment::FileLayer;
 
@@ -36,6 +37,28 @@ pub fn env_files<'a>(resolved: &Resolved<'a>) -> Vec<FileLayer<'a>> {
     .collect()
 }
 
+/// Where a script runs: absolute values as given, relative ones against the config that
+/// declared them, and nothing declared against the package the run started from.
+///
+/// `run` and `inspect` both come here, so an explanation cannot describe a directory the
+/// run would not use. Anchoring a relative value on the caller instead would make a
+/// definition mean a different place from every package, which is the one thing a shared
+/// config exists to prevent.
+pub fn directory(cwd: Option<Declared<'_>>, package_dir: &Path) -> PathBuf {
+  let Some(declared) = cwd else {
+    return package_dir.to_path_buf();
+  };
+
+  let path = Path::new(declared.value);
+  if path.is_absolute() {
+    return path.to_path_buf();
+  }
+
+  // Normalised because the result is printed: joining `apps/api` onto a Windows directory
+  // otherwise mixes both separators in one path.
+  lexically_normalize(&declared.anchor().join(path))
+}
+
 /// The miss, what is available, and the likeliest correction.
 ///
 /// All three matter: the name alone leaves the user guessing, and a suggestion alone
@@ -59,4 +82,62 @@ pub fn unknown(name: &str, loaded: &Loaded, scope: Scope) -> String {
   }
 
   message
+}
+
+#[cfg(test)]
+mod tests {
+  use std::path::{Path, PathBuf};
+
+  use rune_config::inherit::Declared;
+
+  use super::directory;
+
+  /// A repository root spelled the way this operating system spells one.
+  fn root() -> PathBuf {
+    PathBuf::from(if cfg!(windows) { r"C:\repo" } else { "/repo" })
+  }
+
+  /// The root config, which is where every value in these tests was written.
+  fn source() -> PathBuf {
+    root().join("rune.config.ts")
+  }
+
+  #[test]
+  fn a_relative_value_anchors_on_the_config_that_declared_it() {
+    let source = source();
+    let package = root().join("packages").join("ui");
+    let cwd = Declared { value: "apps/api", source: &source };
+
+    assert_eq!(directory(Some(cwd), &package), root().join("apps").join("api"));
+  }
+
+  #[test]
+  fn a_script_with_no_cwd_runs_where_the_run_started() {
+    let package = root().join("packages").join("ui");
+
+    assert_eq!(directory(None, &package), package);
+  }
+
+  #[test]
+  fn an_absolute_value_is_used_as_given() {
+    let source = source();
+    let elsewhere = if cfg!(windows) { r"C:\elsewhere" } else { "/elsewhere" };
+    let cwd = Declared { value: elsewhere, source: &source };
+
+    assert_eq!(directory(Some(cwd), &root()), Path::new(elsewhere));
+  }
+
+  /// Test R2.8 — the constructed path is printed, and a config writes `/` whatever the
+  /// operating system separates with. Joining it on verbatim produces
+  /// `…\packages\ui\apps/api`, which looks like two machines argued over one path.
+  #[test]
+  fn a_constructed_path_carries_one_separator_kind() {
+    let source = source();
+    let cwd = Declared { value: "apps/api", source: &source };
+
+    let printed = directory(Some(cwd), &root()).display().to_string();
+    let foreign = if cfg!(windows) { '/' } else { '\\' };
+
+    assert!(!printed.contains(foreign), "a printed path mixes separators: {printed}");
+  }
 }

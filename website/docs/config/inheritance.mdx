@@ -32,7 +32,7 @@ Chains resolve transitively, in declaration order from the base outward. A cycle
 the names that form it.
 
 `appendArgs` entries are quoted per element for the shell that will run the command, the same way
-arguments after `--` are. An entry containing a space arrives as one argument.
+pass-through arguments are. An entry containing a space arrives as one argument.
 
 `appendArgs` without `extends` is a type error, and Rune rejects it when the config loads:
 

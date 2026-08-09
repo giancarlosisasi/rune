@@ -1,0 +1,12 @@
+---
+source: crates/rune-cli/tests/working_directory.rs
+description: a cwd naming a file
+expression: "redact(file.dir(), &stderr_of(&file_output))"
+---
+script `api` declares a cwd that is a file
+
+  [TMP]/package.json
+
+a `cwd` is resolved against the config that declares it, which is rune.config.ts.
+
+`cwd` names the directory the command runs in.

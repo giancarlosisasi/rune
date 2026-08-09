@@ -9,23 +9,24 @@
 //! `rune-exec` knows how to make it happen. Neither has to know the other's job.
 
 use std::collections::BTreeMap;
-use std::path::Path;
+use std::path::PathBuf;
 
 use rune_config::compose::Plan;
 use rune_config::env::PLATFORM;
 use rune_config::inherit::{Runs, Scope};
 use rune_config::load::Loaded;
+use rune_config::paths::relative_to;
 use rune_config::schema::{self, SuccessPolicy};
 use rune_exec::environment::FileLayer;
-use rune_exec::{Completion, ExecRequest, Member, Task};
+use rune_exec::{Completion, Directory, ExecRequest, Member, Task};
 
-use crate::script::{env_files, load_here, unknown};
+use crate::script::{directory, env_files, load_here, unknown};
 
 /// Resolves `name` and runs everything it stands for.
 ///
-/// `arguments` are what the user typed after `--`. They go last, after everything the
-/// configuration contributed along the extension chain, because the config is the default
-/// and the command line is the override.
+/// `arguments` are what the user typed after the script name. They go last, after
+/// everything the configuration contributed along the extension chain, because the config
+/// is the default and the command line is the override.
 pub fn run(name: &str, arguments: &[String], scope: Scope) -> Result<Completion, String> {
   let loaded = load_here()?;
   let resolved =
@@ -52,9 +53,9 @@ pub fn run(name: &str, arguments: &[String], scope: Scope) -> Result<Completion,
 struct Run<'a> {
   loaded: &'a Loaded,
   scope: Scope,
-  /// The name the user typed, which is the only command the arguments after `--` reach.
-  /// A prerequisite or a group member was not asked for by name, so it does not receive
-  /// them.
+  /// The name the user typed, which is the only command the pass-through arguments
+  /// reach. A prerequisite or a group member was not asked for by name, so it does not
+  /// receive them.
   entry: &'a str,
   arguments: &'a [String],
 }
@@ -67,7 +68,10 @@ struct Prepared<'a> {
   script: String,
   command: &'a str,
   arguments: Vec<String>,
-  cwd: Option<&'a str>,
+  /// Already anchored on the config that declared it, and labelled with that config for
+  /// the message when it cannot be entered.
+  directory: PathBuf,
+  declared_in: Option<String>,
   env: BTreeMap<String, String>,
   files: Vec<FileLayer<'a>>,
   interactive: bool,
@@ -82,7 +86,7 @@ impl Prepared<'_> {
       arguments: &self.arguments,
       root: &loaded.discovered.root,
       package_dir: &loaded.discovered.package_dir,
-      cwd: self.cwd.map(Path::new),
+      directory: Directory { path: &self.directory, declared_in: self.declared_in.as_deref() },
       env: &self.env,
       env_files: &self.files,
       interactive: self.interactive,
@@ -200,7 +204,7 @@ fn one<'a>(script: &str, run: &Run<'a>) -> Result<Prepared<'a>, String> {
     // `PLATFORM` is the same constant a config reads as `rune.platform`, so a config
     // branching by hand and a per-OS object cannot disagree about which system this is.
     .select(PLATFORM);
-  let cwd = resolved.cwd;
+  let discovered = &run.loaded.discovered;
   let interactive = resolved.interactive;
   let files = env_files(&resolved);
 
@@ -213,7 +217,8 @@ fn one<'a>(script: &str, run: &Run<'a>) -> Result<Prepared<'a>, String> {
     script: script.to_owned(),
     command,
     arguments,
-    cwd,
+    directory: directory(resolved.cwd, &discovered.package_dir),
+    declared_in: resolved.cwd.map(|cwd| relative_to(&discovered.root, cwd.source)),
     env: resolved.env,
     files,
     interactive,
@@ -226,8 +231,8 @@ fn one<'a>(script: &str, run: &Run<'a>) -> Result<Prepared<'a>, String> {
 fn arguments_for_a_group(name: &str) -> String {
   format!(
     "`{name}` runs other scripts, so it has no command for these arguments to join\n\n\
-     arguments after `--` go to one command. Name the member that needs them:\n  \
-     rune run <member> -- ..."
+     arguments go to one command. Name the member that needs them:\n  \
+     rune run <member> ..."
   )
 }
 

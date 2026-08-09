@@ -10,18 +10,18 @@
 //! consulted for its name, because that is what decides how arguments are quoted.
 
 use std::fmt::Write as _;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use rune_config::env::PLATFORM;
 use rune_config::inherit::{Link, Resolved, Runs, Scope};
 use rune_config::load::Loaded;
 use rune_config::paths::relative_to;
 use rune_config::schema::{Command, KillSignal, Lifecycle, RetryDelay, SuccessPolicy};
-use rune_exec::environment::{self, Descriptor, Layering};
-use rune_exec::quote::command_line;
+use rune_exec::environment::{self, ChildEnvironment, Descriptor, Layering};
+use rune_exec::quote::{self, command_line};
 use rune_exec::shell::{SHELL_VARIABLE, Shell};
 
-use crate::script::{env_files, load_here, unknown};
+use crate::script::{self, env_files, load_here, unknown};
 
 /// Prints the resolution of `name`: what runs, where, with what, and how that was reached.
 pub fn run(name: &str, scope: Scope) -> Result<(), String> {
@@ -43,9 +43,14 @@ fn render(name: &str, resolved: &Resolved<'_>, loaded: &Loaded) -> String {
   let root = &loaded.discovered.root;
   let mut report = format!("{name}\n\n");
 
+  // Before the command line, because the command line's escaping depends on which child
+  // the script's own `PATH` resolves to.
+  let layering = layered(name, resolved, loaded);
+
   match resolved.runs {
     Runs::Command(command) => {
-      let _ = writeln!(report, "{:<LABEL$}  {}", "command", assembled_command(resolved, command));
+      let line = assembled_command(resolved, command, &layering.environment);
+      let _ = writeln!(report, "{:<LABEL$}  {}", "command", line);
     }
     Runs::Serial { members, continue_on_error } => {
       let _ = writeln!(report, "{:<LABEL$}  {}", "runs", members.join(" → "));
@@ -80,7 +85,6 @@ fn render(name: &str, resolved: &Resolved<'_>, loaded: &Loaded) -> String {
     relative_to(root, &directory(resolved, loaded))
   );
 
-  let layering = layered(name, resolved, loaded);
   for (position, (key, value)) in layering.applied.iter().enumerate() {
     let label = if position == 0 { "environment" } else { "" };
     let _ = writeln!(report, "{label:<LABEL$}  {key}={value}");
@@ -205,20 +209,25 @@ fn layered(name: &str, resolved: &Resolved<'_>, loaded: &Loaded) -> Layering {
 ///
 /// The shell is identified by name only. Locating it on disk is what `run` does, and
 /// doing it here would make an explanation fail on a machine where the tool is missing.
-fn assembled_command(resolved: &Resolved<'_>, command: &Command) -> String {
+/// The child is looked for, because how many times its arguments get read decides how they
+/// are escaped — but a child that cannot be found only means the explanation says what a
+/// single reader would receive, which is what a run would then do too.
+fn assembled_command(
+  resolved: &Resolved<'_>,
+  command: &Command,
+  environment: &ChildEnvironment,
+) -> String {
   let configured = std::env::var_os(SHELL_VARIABLE);
   let shell = Shell::select(configured.as_deref());
+  let selected = command.select(PLATFORM);
+  let reads =
+    quote::reads(selected, shell.kind, environment.get("PATH"), environment.get("PATHEXT"));
 
-  command_line(command.select(PLATFORM), &resolved.append_args, shell.kind)
+  command_line(selected, &resolved.append_args, shell.kind, reads)
 }
 
-/// Where the script would run: the same rule `run` applies, so the two cannot disagree.
+/// Where the script would run: literally the function `run` calls, so the explanation and
+/// the run cannot describe two different directories.
 fn directory(resolved: &Resolved<'_>, loaded: &Loaded) -> PathBuf {
-  let package_dir = &loaded.discovered.package_dir;
-
-  match resolved.cwd.map(Path::new) {
-    Some(cwd) if cwd.is_absolute() => cwd.to_path_buf(),
-    Some(cwd) => package_dir.join(cwd),
-    None => package_dir.clone(),
-  }
+  script::directory(resolved.cwd, &loaded.discovered.package_dir)
 }
