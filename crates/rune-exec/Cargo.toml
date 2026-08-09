@@ -16,6 +16,9 @@ thiserror = { workspace = true }
 tokio = { workspace = true }
 
 [dev-dependencies]
+# The child-resolution table needs real files on a real PATH: which file the lookup picks
+# is the whole decision, and a fake filesystem would be asserting the fake.
+tempfile = { workspace = true }
 # `start_paused`: the retry schedule is asserted on a clock the test advances, so no test
 # here waits out a real delay.
 tokio = { workspace = true, features = ["test-util"] }

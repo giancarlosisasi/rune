@@ -54,6 +54,35 @@ pub fn binary() -> PathBuf {
   PathBuf::from(env!("CARGO_BIN_EXE_rune"))
 }
 
+/// A package manager this machine can actually run, by the name `Command` needs to find
+/// it.
+///
+/// On Windows every one of them ships as a batch file, and `Command` searches `PATH`
+/// appending `.exe` and nothing else.
+pub fn package_manager(name: &str) -> Option<String> {
+  let program = if cfg!(windows) { format!("{name}.cmd") } else { name.to_owned() };
+
+  let usable = Command::new(&program)
+    .arg("--version")
+    .stdin(Stdio::null())
+    .stdout(Stdio::null())
+    .stderr(Stdio::null())
+    .status()
+    .is_ok_and(|status| status.success());
+
+  usable.then_some(program)
+}
+
+/// Puts the binary under test where a `package.json` script can find it by name, which
+/// is the only way a package manager will ever start it.
+pub fn with_rune_on_path(command: &mut Command) {
+  let directory = binary().parent().expect("the binary sits in a directory").to_owned();
+  let inherited = std::env::var_os("PATH").unwrap_or_default();
+  let entries = std::iter::once(directory).chain(std::env::split_paths(&inherited));
+
+  command.env("PATH", std::env::join_paths(entries).expect("a PATH the operating system accepts"));
+}
+
 /// A path spelled the way the filesystem spells it.
 ///
 /// A temporary directory is reached through a symlink on macOS — `/var/folders/…`
@@ -62,6 +91,35 @@ pub fn binary() -> PathBuf {
 /// sides go through this before they meet.
 pub fn canonical(path: &Path) -> PathBuf {
   std::fs::canonicalize(path).unwrap_or_else(|_| path.to_owned())
+}
+
+/// Replaces every spelling of `dir` with `[TMP]`, then writes what is left with forward
+/// slashes, so one snapshot serves every platform.
+///
+/// A temporary directory has more than one spelling — macOS resolves `/var/folders/…` to
+/// `/private/var/folders/…`, and a Windows runner hands out `TEMP` as an 8.3 short name.
+/// Which one a message carries depends on who built the path, so both are replaced, and
+/// the longest first: on macOS one spelling contains the other, and replacing the short
+/// one first leaves `/private[TMP]`.
+pub fn redact(dir: &Path, text: &str) -> String {
+  let mut spellings: Vec<String> = [dir.to_path_buf(), canonical(dir)]
+    .iter()
+    .flat_map(|path| {
+      let native = path.to_string_lossy().into_owned();
+      let slashed = native.replace('\\', "/");
+      [native, slashed]
+    })
+    .collect();
+
+  spellings.sort_by(|left, right| right.len().cmp(&left.len()).then_with(|| left.cmp(right)));
+  spellings.dedup();
+
+  let mut redacted = text.to_owned();
+  for spelling in spellings {
+    redacted = redacted.replace(&spelling, "[TMP]");
+  }
+
+  redacted.replace('\\', "/")
 }
 
 /// Asserts that a path rune reported is the directory the test meant, whichever spelling
@@ -152,6 +210,22 @@ impl Test {
     std::fs::create_dir_all(parent).expect("create fixture parent directories");
     std::fs::copy(testkit(), &path).expect("copy the fixture binary");
     make_executable(&path);
+    self
+  }
+
+  /// Puts a batch file at `relative` that hands its whole argument line to `target`, the
+  /// way the `.cmd` shims a package manager generates hand theirs to node.
+  ///
+  /// `%*` is what makes the batch file a second reader of a line `cmd.exe` has already
+  /// read, and being a second reader is the entire reason this fixture exists.
+  pub fn shim(self, relative: &str, target: &str) -> Self {
+    let path = self.dir.path().join(relative);
+    let parent = path.parent().expect("a fixture path always has a parent");
+    std::fs::create_dir_all(parent).expect("create fixture parent directories");
+    // Carriage returns on purpose: a batch file is read a line at a time and the reader
+    // is not the one that tolerates a lone line feed.
+    std::fs::write(&path, format!("@echo off\r\n\"%~dp0{target}\" report-env %*\r\n"))
+      .expect("write the batch shim");
     self
   }
 

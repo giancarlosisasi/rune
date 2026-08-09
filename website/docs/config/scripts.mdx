@@ -61,9 +61,26 @@ Every variant accepts these.
 | Field | Type | Default | Meaning |
 | --- | --- | --- | --- |
 | `description` | `string` | none | Shown by `rune list` |
-| `cwd` | `string` | the package directory | Where the script runs. A relative value resolves against the package directory; an absolute value is used as written |
+| `cwd` | `string` | the invoking package | Where the script runs. A relative value resolves against the config that declared it; an absolute value is used as written |
 | `env` | `Record<string, string>` | `{}` | Variables applied last, so they win over everything inherited |
 | `envFile` | `string` | none | A dotenv file whose assignments fill gaps in the environment |
+
+### A relative path belongs to the config that wrote it
+
+`cwd` and `envFile` follow one rule: a relative path in a config is relative to that config,
+whichever directory the run started in.
+
+```ts
+// rune.config.ts, at the repository root
+'start:api': { command: 'node server.js', cwd: 'apps/api' },
+```
+
+`rune run start:api` enters `apps/api` under the root from anywhere in the workspace. A package that
+narrows the script and writes its own `cwd` anchors on that package instead, because that package is
+the config that wrote the value.
+
+Leaving `cwd` out is the way to say "wherever the run started". That is the default, and it is what
+makes one shared definition usable from each package in turn.
 
 ## The command variant
 

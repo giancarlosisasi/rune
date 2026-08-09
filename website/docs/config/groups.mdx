@@ -145,16 +145,16 @@ A group entry accepts `description`, `cwd`, `env`, `envFile`, `continueOnError` 
 Put them on the members instead. To run something before a group, make it the first member of a
 `serial` group with the original one after it.
 
-## Arguments after --
+## Pass-through arguments
 
 A group has no command of its own, so there is nothing for pass-through arguments to join:
 
 ```
-$ rune run ci -- --watch
+$ rune run ci --watch
 `ci` runs other scripts, so it has no command for these arguments to join
 
-arguments after `--` go to one command. Name the member that needs them:
-  rune run <member> -- ...
+arguments go to one command. Name the member that needs them:
+  rune run <member> ...
 ```
 
 Appending them to every member would run a flag against tools that never asked for it, and

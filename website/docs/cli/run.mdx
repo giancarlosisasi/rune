@@ -1,12 +1,12 @@
 ---
 title: 'rune run'
-description: 'Execute a script by name, pass arguments after --, and propagate the child exit code exactly.'
+description: 'Execute a script by name, append arguments to its command, and propagate the child exit code exactly.'
 ---
 
 # rune run
 
 ```
-rune run <name> [--root] [-- args...]
+rune run [--root] <name> [args...]
 ```
 
 Resolves `name` against the nearest config, spawns it through the platform shell, waits, and exits
@@ -14,19 +14,92 @@ with the child's code.
 
 | Argument | Meaning |
 | --- | --- |
-| `<name>` | The script name. Required |
 | `--root` | Resolve against the root config, ignoring any package override |
-| `-- args...` | Everything after `--` is appended to the resolved command |
+| `<name>` | The script name. Required |
+| `args...` | Everything after the name is appended to the resolved command |
 
-## Arguments after --
+## Arguments for the command
 
 ```bash
-rune run test -- --watch --reporter=verbatim
+rune run test --watch --reporter=verbatim
 ```
+
+The script name is the boundary. Rune's own options come before it — the rule `npm run` already
+uses — and everything after it belongs to the command.
 
 Each element is quoted for the shell that will receive it, so an argument containing a space
 arrives as one argument. This matches `npm run test -- --watch`, and the parity is covered by a
 test suite that compares the two byte for byte.
+
+### From a package.json script
+
+This is the layout to write, and it needs no separator:
+
+```json
+{ "scripts": { "test": "rune run test" } }
+```
+
+`npm test -- --watch` and `pnpm test -- --watch` both reach the child. The package manager
+implements its `--` by appending `--watch` to the command string, so the separator is spent on the
+append and never reaches Rune. Nothing needs it to.
+
+### Typing the separator yourself
+
+`--` still works and still means what it always meant:
+
+```bash
+rune run test -- --watch       # the same as rune run test --watch
+rune run build --              # appends nothing
+rune run build -- --root       # passes --root to the command
+```
+
+The last line is the one it is still needed for: a value that would otherwise read as one of Rune's
+own options.
+
+### An option Rune knows, after the name
+
+```
+$ rune run build --root
+warning: `--root` went to the command, not to rune
+
+rune's own options come before the script name:
+  rune run --root build
+```
+
+The command still receives `--root` and resolution is unaffected. This is the one case the
+positional rule can surprise someone, so it is never silent.
+
+### How to call Rune on Windows
+
+`pnpm exec rune`, a `package.json` script, and Git Bash all hand your arguments to Rune unchanged.
+
+Running `node_modules\.bin\rune.CMD` by hand does not. That file is a batch shim the package manager
+generated, and `cmd.exe` re-parses everything through it, so `&`, `^`, `|`, `<`, `>`, `(`, `)`, `%`
+and `!` inside an argument change meaning before Rune starts. This is true of every tool installed
+from npm, not of Rune alone.
+
+PowerShell removes a bare `--` from the arguments it forwards. Nothing here depends on the separator
+surviving, so the PowerShell path works — but it is why typing `--` is not a way to make an
+invocation safer there.
+
+### Arguments Rune passes to a tool
+
+The same trap sits on the other side, and Rune closes it. On Windows nearly every tool in
+`node_modules/.bin` is a batch file, and a batch file re-reads its own arguments through `%*` after
+`cmd.exe` has already read the line. An argument escaped once for `cmd.exe` arrives at the tool with
+its `&` acting as a command separator, which turns a filename into two commands:
+
+```bash
+rune run lint "zz-a&cd.ts"
+```
+
+When the command resolves to a `.cmd` or `.bat` file, Rune escapes each argument for both readers, so
+that filename reaches the tool whole. The decision is made from the file `PATH` resolution chose, not
+from the text of the command, because nobody writes the `.cmd` extension. A command that starts with
+an operator or a variable expansion is left exactly as it is.
+
+**The limit**, stated rather than left to be found: a batch file that calls another batch file adds a
+third reader and is not covered. No runner in this ecosystem covers it.
 
 ## The terminal
 
@@ -89,14 +162,14 @@ create one at the root of your repository with:
 ## Running a group
 
 `name` may be a `serial` or `parallel` group. A group has no command of its own, so it takes no
-arguments after `--`:
+arguments:
 
 ```
-$ rune run ci -- --watch
+$ rune run ci --watch
 `ci` runs other scripts, so it has no command for these arguments to join
 
-arguments after `--` go to one command. Name the member that needs them:
-  rune run <member> -- ...
+arguments go to one command. Name the member that needs them:
+  rune run <member> ...
 ```
 
 See [Groups](/config/groups).

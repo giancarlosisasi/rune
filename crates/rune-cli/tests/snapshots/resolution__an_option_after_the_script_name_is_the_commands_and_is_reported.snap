@@ -1,0 +1,8 @@
+---
+source: crates/rune-cli/tests/resolution.rs
+expression: stderr
+---
+warning: `--root` went to the command, not to rune
+
+rune's own options come before the script name:
+  rune run --root probe

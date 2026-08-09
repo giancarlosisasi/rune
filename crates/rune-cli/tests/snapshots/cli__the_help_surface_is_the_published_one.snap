@@ -22,15 +22,23 @@ Options:
 $ rune run --help
 Run a script by name
 
-Usage: rune run [OPTIONS] <NAME> [-- <ARGS>...]
+rune's own options come before the script name. Everything after the name is appended to the script's command, whether or not a `--` separates it.
+
+Usage: rune run [OPTIONS] <NAME> [ARGS]...
 
 Arguments:
-  <NAME>     The script to run
-  [ARGS]...  Arguments appended to the script's command, after `--`
+  <NAME>
+          The script to run
+
+  [ARGS]...
+          Arguments appended to the script's command
 
 Options:
-      --root  Resolve against the root config only, ignoring this package's definitions
-  -h, --help  Print help
+      --root
+          Resolve against the root config only, ignoring this package's definitions
+
+  -h, --help
+          Print help (see a summary with '-h')
 
 $ rune list --help
 List all available scripts

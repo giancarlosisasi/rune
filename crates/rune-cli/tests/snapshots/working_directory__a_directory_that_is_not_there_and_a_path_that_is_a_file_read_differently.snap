@@ -1,0 +1,12 @@
+---
+source: crates/rune-cli/tests/working_directory.rs
+description: a cwd naming a directory that is not there
+expression: "redact(missing.dir(), &stderr_of(&missing_output))"
+---
+script `api` declares a cwd that does not exist
+
+  [TMP]/apps/nope
+
+a `cwd` is resolved against the config that declares it, which is rune.config.ts.
+
+create the directory, or correct `cwd`.

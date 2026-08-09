@@ -80,7 +80,8 @@ pub struct Resolved<'a> {
   /// The scripts that run before this one, in order. Empty when it has none.
   pub depends_on: &'a [String],
   pub description: Option<&'a str>,
-  pub cwd: Option<&'a str>,
+  /// Where the script runs, together with the config that said so.
+  pub cwd: Option<Declared<'a>>,
   /// The script keeps rune's own terminal even as one member of a group.
   pub interactive: bool,
   /// The lifecycle options the chain declared, each one taken from the last script that
@@ -94,6 +95,27 @@ pub struct Resolved<'a> {
   pub env_files: Vec<&'a EnvFile>,
   /// The base first, then every script that built on it.
   pub chain: Vec<Link<'a>>,
+}
+
+/// A value a config wrote, and the config that wrote it.
+///
+/// A relative path in a config is relative to that config, so the two are one fact. They
+/// travel together because a layer narrows a script one key at a time: working out
+/// afterwards which layer contributed a value means deciding it a second time, and two
+/// decisions can disagree.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Declared<'a> {
+  pub value: &'a str,
+  /// The config file, not its directory. Messages name the file; anchoring uses its
+  /// parent.
+  pub source: &'a Path,
+}
+
+impl Declared<'_> {
+  /// The directory a relative value is relative to.
+  pub fn anchor(&self) -> &Path {
+    self.source.parent().unwrap_or_else(|| Path::new("."))
+  }
 }
 
 impl<'a> Resolved<'a> {
@@ -273,8 +295,8 @@ fn merge<'a>(layers: &'a [Layer], walked: &[Step<'a>]) -> Resolved<'a> {
     if script.description.is_some() {
       description = script.description.as_deref();
     }
-    if script.cwd.is_some() {
-      cwd = script.cwd.as_deref();
+    if let Some(declared) = &script.cwd {
+      cwd = Some(Declared { value: declared, source: &layers[*layer].source });
     }
     if let Some(declared) = script.interactive {
       interactive = declared;
@@ -403,7 +425,11 @@ mod tests {
 
     assert_eq!(resolved.env["NODE_ENV"], "ci", "the extending script must win");
     assert_eq!(resolved.env["TZ"], "UTC", "the base's other variables must survive");
-    assert_eq!(resolved.cwd, Some("packages/core"), "an undeclared field is inherited");
+    assert_eq!(
+      resolved.cwd.map(|cwd| cwd.value),
+      Some("packages/core"),
+      "an undeclared field is inherited"
+    );
     assert_eq!(resolved.description, Some("run the unit tests"));
   }
 
@@ -418,7 +444,7 @@ mod tests {
 
     let resolved = resolve(&layers, "other", Scope::Nearest).expect("resolves").expect("defined");
 
-    assert_eq!(resolved.cwd, Some("b"));
+    assert_eq!(resolved.cwd.map(|cwd| cwd.value), Some("b"));
     assert_eq!(resolved.description, Some("the same, elsewhere"));
   }
 

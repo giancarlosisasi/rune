@@ -82,8 +82,9 @@ is on [Exit codes](/reference/exit-codes).
 
 ## Passing arguments through
 
-Everything after `--` is appended to the resolved command, quoted per element for the shell that
-will receive it.
+Everything after the script name is appended to the resolved command, quoted per element for the
+shell that will receive it. The package manager appends its own extra arguments to the command
+string, so this works through the script you already wrote and needs no separator anywhere.
 
 <PackageManagerTabs command={{
   npm: 'npm run test -- --watch',
@@ -91,6 +92,12 @@ will receive it.
   pnpm: 'pnpm test -- --watch',
   bun: 'bun run test -- --watch',
 }} />
+
+Calling Rune directly, the same thing without a separator:
+
+```bash
+rune run test --watch
+```
 
 ## When the name is wrong
 

@@ -98,11 +98,40 @@ fn push_cmd_arguments(command: &mut Command, command_line: &str) {
   command.args(["/d", "/s", "/c", command_line]);
 }
 
-/// Finds the shell binary the way a user expects a name typed into a terminal to be found.
+/// What a command can begin with that means it does not begin with a plain program name.
+const OPERATOR: &[char] = &['&', '|', '<', '>', '(', ')', '^', '%', '!'];
+
+/// The program a command starts with, when it starts with one.
+///
+/// Nothing else about the command is read. rune does not learn what `&&`, a pipe or a
+/// redirection mean — the shell keeps that job. It reads the first word, because
+/// identifying the child is the only way to know how many readers its arguments will pass
+/// through.
+///
+/// A command beginning with an operator, a variable expansion or nothing at all yields
+/// `None`, and `None` means "behave exactly as if this had never been asked".
+pub fn leading_program(command: &str) -> Option<&str> {
+  let command = command.trim_start();
+
+  if let Some(quoted) = command.strip_prefix('"') {
+    return quoted.split('"').next().filter(|token| !token.is_empty());
+  }
+
+  let token = command.split_whitespace().next()?;
+  (!token.contains(OPERATOR)).then_some(token)
+}
+
+/// Finds a program on `PATH` the way Windows finds one, for callers that need to know
+/// which file a bare name stands for.
 ///
 /// `std::process::Command` on Windows searches `PATH` but only ever appends `.exe`, so a
-/// shell installed as `.cmd` or `.bat` is reported missing. Everywhere else the operating
-/// system's own lookup is already what the user expects.
+/// program installed as `.cmd` or `.bat` is reported missing. Everywhere else the
+/// operating system's own lookup is already what the user expects.
+///
+/// `PATHEXT` is tried before the name as written, which is the order Windows itself uses:
+/// a package manager writes both `biome` and `biome.CMD` into `node_modules/.bin`, the
+/// first is a shell script no Windows process can start, and the second is the one that
+/// runs. Preferring the exact name would answer with the file nothing executes.
 pub fn locate(
   program: &Path,
   path: Option<&OsStr>,
@@ -118,9 +147,6 @@ pub fn locate(
 
   for directory in path.into_iter().flat_map(std::env::split_paths) {
     let candidate = directory.join(program);
-    if candidate.is_file() {
-      return Some(candidate);
-    }
 
     for extension in &extensions {
       let mut with_extension = candidate.clone().into_os_string();
@@ -129,6 +155,10 @@ pub fn locate(
       if with_extension.is_file() {
         return Some(with_extension);
       }
+    }
+
+    if candidate.is_file() {
+      return Some(candidate);
     }
   }
 
@@ -140,7 +170,7 @@ mod tests {
   use std::ffi::OsStr;
   use std::path::Path;
 
-  use super::{Shell, ShellKind, kind_of};
+  use super::{Shell, ShellKind, kind_of, leading_program};
 
   #[test]
   fn the_kind_survives_directories_extensions_and_case() {
@@ -180,5 +210,49 @@ mod tests {
 
     assert_eq!(shell.program, Path::new("/usr/bin/zsh"));
     assert_eq!(shell.kind, ShellKind::Posix);
+  }
+
+  /// The order that decides which of two files with the same stem is the one that runs.
+  #[cfg(windows)]
+  #[test]
+  fn a_path_extension_wins_over_the_name_as_written() {
+    let directory = tempfile::tempdir().expect("create tempdir");
+    for name in ["biome", "biome.CMD"] {
+      std::fs::write(directory.path().join(name), "").expect("write the fixture");
+    }
+
+    let located = super::locate(
+      Path::new("biome"),
+      Some(directory.path().as_os_str()),
+      Some(OsStr::new(".EXE;.CMD")),
+    );
+
+    assert_eq!(located, Some(directory.path().join("biome.CMD")));
+  }
+
+  /// Test R3.7 — the first word, and nothing more.
+  ///
+  /// Everything that is not a plain program name answers `None`, which is what keeps this
+  /// from growing into a command parser: there is no case where reading further would
+  /// change an answer.
+  #[test]
+  fn the_leading_program_is_read_and_nothing_else() {
+    let table = [
+      ("biome lint .", Some("biome")),
+      ("  vitest --run  ", Some("vitest")),
+      ("tsc", Some("tsc")),
+      (r#""C:\Program Files\tool\biome.cmd" lint ."#, Some(r"C:\Program Files\tool\biome.cmd")),
+      ("&& echo late", None),
+      ("| tee log.txt", None),
+      ("%NPM_TOOL% lint", None),
+      ("(echo grouped)", None),
+      ("", None),
+      ("   ", None),
+      (r#""" lint"#, None),
+    ];
+
+    for (command, expected) in table {
+      assert_eq!(leading_program(command), expected, "{command:?}");
+    }
   }
 }

@@ -1249,6 +1249,7 @@ dependencies = [
  "futures-util",
  "nix 0.31.3",
  "rune-out",
+ "tempfile",
  "thiserror 2.0.19",
  "tokio",
  "windows-sys",

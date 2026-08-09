@@ -6,17 +6,61 @@
 //! happens when quoting is written once, against the shell the author's own machine
 //! runs, so the shell is an argument here and the table that tests it runs everywhere.
 
-use crate::shell::ShellKind;
+use std::ffi::OsStr;
+use std::path::Path;
 
-/// `command` with `arguments` appended, each one quoted for `shell`.
+use crate::shell::{self, ShellKind};
+
+/// How many readers an argument has to survive on its way to the child.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Reads {
+  /// The shell reads the line, and the child's own startup code splits what it is handed.
+  Once,
+  /// A batch file re-reads its arguments through `%*` after `cmd.exe` has already read
+  /// the line, so everything cmd acts on has to survive being read twice.
+  Twice,
+}
+
+/// How many readers the arguments appended to `command` will pass through.
+///
+/// Decided from the file `PATH` resolution actually chooses, never from the command text:
+/// a config writes `biome`, the file is `biome.CMD`, and nobody writes the extension. The
+/// `PATH` to search is the child's own, `node_modules/.bin` directories included, because
+/// that is the one the shell will search.
+pub fn reads(
+  command: &str,
+  shell: ShellKind,
+  path: Option<&OsStr>,
+  path_extensions: Option<&OsStr>,
+) -> Reads {
+  if shell != ShellKind::Cmd {
+    return Reads::Once;
+  }
+
+  let resolved = shell::leading_program(command)
+    .and_then(|program| shell::locate(Path::new(program), path, path_extensions));
+
+  match resolved {
+    Some(file) if is_batch_file(&file) => Reads::Twice,
+    _ => Reads::Once,
+  }
+}
+
+fn is_batch_file(file: &Path) -> bool {
+  file.extension().is_some_and(|extension| {
+    extension.eq_ignore_ascii_case("cmd") || extension.eq_ignore_ascii_case("bat")
+  })
+}
+
+/// `command` with `arguments` appended, each one quoted for `shell` and for `reads`.
 ///
 /// Nothing is appended for an empty list, so a bare `--` leaves the command exactly as
 /// the config wrote it.
-pub fn command_line(command: &str, arguments: &[String], shell: ShellKind) -> String {
+pub fn command_line(command: &str, arguments: &[String], shell: ShellKind, reads: Reads) -> String {
   let mut line = command.to_owned();
   for argument in arguments {
     line.push(' ');
-    line.push_str(&quote(argument, shell));
+    line.push_str(&quote(argument, shell, reads));
   }
 
   line
@@ -24,10 +68,10 @@ pub fn command_line(command: &str, arguments: &[String], shell: ShellKind) -> St
 
 /// One element, quoted so `shell` hands it to the child as a single argument with its
 /// content intact.
-pub fn quote(element: &str, shell: ShellKind) -> String {
+pub fn quote(element: &str, shell: ShellKind, reads: Reads) -> String {
   match shell {
     ShellKind::Posix => posix(element),
-    ShellKind::Cmd => cmd(element),
+    ShellKind::Cmd => cmd(element, reads),
     ShellKind::PowerShell => power_shell(element),
   }
 }
@@ -71,7 +115,8 @@ fn drop_leading_empty_runs(quoted: &str) -> &str {
   &quoted[start..]
 }
 
-/// Two escapes, because two parsers read the line.
+/// Two escapes, because two parsers read the line — and three when the child is a batch
+/// file, because it re-reads its own arguments after cmd has finished with them.
 ///
 /// The child's own startup code splits the command line by the MSVC rules — double
 /// quotes group, backslashes only matter in front of a quote — and `cmd.exe` reads the
@@ -79,10 +124,13 @@ fn drop_leading_empty_runs(quoted: &str) -> &str {
 /// element is first quoted for the child, then every character cmd would act on is
 /// prefixed with `^` for cmd.
 ///
-/// A batch file re-reads its arguments a third time, which needs a third round. That is
-/// not done here: knowing a command ends in `.cmd` means parsing the command string to
-/// find where it starts, and this change does not tokenize the user's command.
-fn cmd(element: &str) -> String {
+/// `%*` inside a batch file expands to text that cmd then reads again, so a second `^`
+/// round is what leaves the first one intact for that second reading. Without it an `&`
+/// in a filename ends the command and runs whatever followed it.
+///
+/// A batch file that calls another batch file would need a fourth round. That is
+/// unbounded, and no runner in this ecosystem attempts it.
+fn cmd(element: &str, reads: Reads) -> String {
   if element.is_empty() {
     // A bare pair of quotes: cmd hands it on, and the child's own parser reads it as the
     // empty argument. Prefixing them with `^` would work too, and npm does not, so this
@@ -96,8 +144,17 @@ fn cmd(element: &str) -> String {
     element.to_owned()
   };
 
-  let mut escaped = String::with_capacity(quoted.len());
-  for character in quoted.chars() {
+  let escaped = escape_for_cmd(&quoted);
+  match reads {
+    Reads::Once => escaped,
+    Reads::Twice => escape_for_cmd(&escaped),
+  }
+}
+
+/// Every character cmd acts on, prefixed with the one character that stops it acting.
+fn escape_for_cmd(text: &str) -> String {
+  let mut escaped = String::with_capacity(text.len());
+  for character in text.chars() {
     if CMD_SPECIAL.contains(&character) {
       escaped.push('^');
     }
@@ -155,7 +212,9 @@ fn power_shell(element: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-  use super::{ShellKind, command_line, quote};
+  use std::ffi::OsString;
+
+  use super::{Reads, ShellKind, command_line, quote, reads};
 
   /// Test 4a.6 — one element, three shells, three answers.
   ///
@@ -181,9 +240,13 @@ mod tests {
     ];
 
     for (element, posix, cmd, power_shell) in table {
-      assert_eq!(quote(element, ShellKind::Posix), posix, "posix: {element:?}");
-      assert_eq!(quote(element, ShellKind::Cmd), cmd, "cmd: {element:?}");
-      assert_eq!(quote(element, ShellKind::PowerShell), power_shell, "powershell: {element:?}");
+      assert_eq!(quote(element, ShellKind::Posix, Reads::Once), posix, "posix: {element:?}");
+      assert_eq!(quote(element, ShellKind::Cmd, Reads::Once), cmd, "cmd: {element:?}");
+      assert_eq!(
+        quote(element, ShellKind::PowerShell, Reads::Once),
+        power_shell,
+        "powershell: {element:?}"
+      );
     }
   }
 
@@ -191,20 +254,70 @@ mod tests {
   /// doubling it, the child sees an escaped quote instead of a closing one.
   #[test]
   fn backslashes_before_a_quote_are_doubled_for_cmd() {
-    assert_eq!(quote(r#"a\"b c"#, ShellKind::Cmd), r#"^"a\\\^"b^ c^""#);
-    assert_eq!(quote(r"a\b c", ShellKind::Cmd), r#"^"a\b^ c^""#);
-    assert_eq!(quote(r"trailing\", ShellKind::Cmd), r"trailing\");
+    assert_eq!(quote(r#"a\"b c"#, ShellKind::Cmd, Reads::Once), r#"^"a\\\^"b^ c^""#);
+    assert_eq!(quote(r"a\b c", ShellKind::Cmd, Reads::Once), r#"^"a\b^ c^""#);
+    assert_eq!(quote(r"trailing\", ShellKind::Cmd, Reads::Once), r"trailing\");
+  }
+
+  /// A second reader means a second round, over the result of the first. The `^` that
+  /// protects the metacharacter is itself a metacharacter, so it is what the second round
+  /// mostly protects.
+  #[test]
+  fn a_second_reader_gets_a_second_round() {
+    let table = [
+      ("--watch", "--watch"),
+      ("a&b", "a^^^&b"),
+      ("a|b", "a^^^|b"),
+      ("a<b>c", "a^^^<b^^^>c"),
+      ("a^b", "a^^^^b"),
+      ("a b", r#"^^^"a^^^ b^^^""#),
+      ("", "\"\""),
+    ];
+
+    for (element, expected) in table {
+      assert_eq!(quote(element, ShellKind::Cmd, Reads::Twice), expected, "{element:?}");
+    }
+  }
+
+  /// Only a batch child is read twice, and only cmd reads a line the way that matters.
+  /// Everything else answers `Once`, which is the behaviour that was already correct.
+  #[test]
+  fn only_a_batch_file_child_is_read_twice() {
+    let directory = tempfile::tempdir().expect("create tempdir");
+    // `biome` beside `biome.CMD` is what a package manager actually writes: a shell script
+    // no Windows process can start, and the batch file that runs instead of it.
+    for name in ["biome", "biome.CMD", "legacy.bat", "real.exe"] {
+      std::fs::write(directory.path().join(name), "").expect("write the fixture");
+    }
+
+    let path = OsString::from(directory.path());
+    let extensions = OsString::from(".COM;.EXE;.BAT;.CMD");
+    let of = |command: &str, shell| reads(command, shell, Some(&path), Some(&extensions));
+
+    if cfg!(windows) {
+      assert_eq!(of("biome lint .", ShellKind::Cmd), Reads::Twice);
+      assert_eq!(of("legacy", ShellKind::Cmd), Reads::Twice);
+      assert_eq!(of("real --flag", ShellKind::Cmd), Reads::Once, "a real executable reads once");
+      assert_eq!(of("absent", ShellKind::Cmd), Reads::Once, "an unresolvable child reads once");
+      assert_eq!(of("| biome", ShellKind::Cmd), Reads::Once, "an operator stops the reading");
+    }
+
+    assert_eq!(of("biome lint .", ShellKind::Posix), Reads::Once, "posix is one reader");
+    assert_eq!(of("biome lint .", ShellKind::PowerShell), Reads::Once);
   }
 
   #[test]
   fn an_empty_argument_list_leaves_the_command_alone() {
-    assert_eq!(command_line("vitest --run", &[], ShellKind::Posix), "vitest --run");
+    assert_eq!(command_line("vitest --run", &[], ShellKind::Posix, Reads::Once), "vitest --run");
   }
 
   #[test]
   fn arguments_are_appended_in_order_after_the_command() {
     let arguments = ["--reporter".to_owned(), "a b".to_owned()];
 
-    assert_eq!(command_line("vitest", &arguments, ShellKind::Posix), "vitest --reporter 'a b'");
+    assert_eq!(
+      command_line("vitest", &arguments, ShellKind::Posix, Reads::Once),
+      "vitest --reporter 'a b'"
+    );
   }
 }
