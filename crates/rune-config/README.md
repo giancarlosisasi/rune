@@ -21,7 +21,7 @@ Part of the [rune](../../README.md) workspace. User documentation is at
 read. `trace.rs` maps an engine stack trace back to the TypeScript the user wrote, and `suggest.rs`
 turns a name nobody defined into the name they meant.
 
-A config runs with one ambient object — `rune.env`, `rune.platform`, `rune.isCI` — and nothing else.
+A config runs with one imported object — `rune.env`, `rune.platform`, `rune.isCI` — and nothing else.
 npm packages and Node built-ins do not exist at evaluation time, so an import must be a relative
 `.ts` file in the repository. Every refused name says what does work instead.
 

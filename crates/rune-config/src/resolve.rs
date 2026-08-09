@@ -24,8 +24,8 @@ pub enum ResolveError {
      what does work:\n  \
      - `import type {{ ... }} from \"{specifier}\"` — type-only imports are erased before evaluation\n  \
      - a relative import of a file in this repository, such as `./scripts/helpers.ts`\n  \
-     - `import {{ defineConfig }} from \"{}\"` — the one package rune supplies itself\n  \
-     - the `rune` global: `rune.env`, `rune.platform`, `rune.isCI`",
+     - `import {{ defineConfig }} from \"{1}\"` — the one package rune supplies itself\n  \
+     - `import {{ rune }} from \"{1}\"` — then `rune.env`, `rune.platform`, `rune.isCI`",
     .importer.display(),
     crate::builtin::MODULE
   )]
