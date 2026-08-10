@@ -1,7 +1,7 @@
 use std::ffi::OsString;
 use std::process::ExitCode;
 
-use clap::{Arg, CommandFactory, Parser, Subcommand};
+use clap::{Arg, CommandFactory, FromArgMatches as _, Parser, Subcommand};
 use rune_config::inherit::Scope;
 
 mod init;
@@ -52,9 +52,13 @@ enum Command {
     #[arg(long)]
     root: bool,
   },
-  /// Write a starter rune.config.ts in the current directory
+  /// Write a starter rune.config.ts beside the nearest package.json
+  ///
+  /// The nearest package.json at or above this directory decides where the config goes,
+  /// so running from a subfolder still writes it where the rest of rune can see it. With
+  /// no package.json above, it is written here.
   Init {
-    /// Seed the starter with the scripts from the nearest package.json
+    /// Seed the starter with the scripts from that same package.json
     #[arg(long)]
     from_package_json: bool,
   },
@@ -77,7 +81,13 @@ enum CacheCommand {
 }
 
 fn main() -> ExitCode {
-  let cli = Cli::parse_from(with_the_boundary_marked(std::env::args_os().collect()));
+  // The version is handed to clap at startup rather than declared, because half of what
+  // it reports — the binary that answered — is only knowable at run time.
+  let command = Cli::command().version(version::report());
+  let cli = Cli::from_arg_matches(
+    &command.get_matches_from(with_the_boundary_marked(std::env::args_os().collect())),
+  )
+  .expect("the parsed arguments come from this grammar");
 
   match cli.command {
     // The child's exit code is the product of this subcommand, so it does not go through

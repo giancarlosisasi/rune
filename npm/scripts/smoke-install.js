@@ -66,11 +66,12 @@ function smoke(tarballs) {
     fs.cpSync(FIXTURE, project, { recursive: true });
     install(project, tarballs, entry);
 
-    assert.equal(
-      script('reported-version', project),
-      `rune ${version}`,
-      'the installed rune reports another version',
-    );
+    // The first line only: the second names the binary that answered, which is the
+    // install's own temporary directory and differs on every run.
+    const [reported, resolved] = script('reported-version', project).split('\n');
+
+    assert.equal(reported, `rune ${version}`, 'the installed rune reports another version');
+    assert.ok(resolved, 'the version query must name the binary that produced it');
 
     const listed = script('visible-scripts', project);
     for (const name of ['greet', 'check']) {

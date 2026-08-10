@@ -47,10 +47,24 @@ disk, which it must be to run.
 ## Wrapper resolution
 
 1. `RUNE_BINARY_PATH`, when set. A missing file there is a hard error.
-2. `require.resolve` on the platform package for the current `process.platform` and
+2. A rune installed in the repository you are standing in, found by walking up from the working
+   directory to the first `node_modules/@gio-labs/rune` and stopping at the repository boundary.
+   When that install is not the copy already running, it takes over from there.
+3. `require.resolve` on the platform package for the current `process.platform` and
    `process.arch`.
-3. On arm64, the x64 sibling, with the warning above.
-4. Diagnostics.
+4. On arm64, the x64 sibling, with the warning above.
+5. Diagnostics.
+
+Step 2 is why a rune installed globally does not override the version a repository pins. Inside that
+repository, the pinned copy runs, which is the copy CI runs — CI goes through `package.json`, so it
+always resolves the local one. It happens silently, because running the pinned version is what you
+meant. `rune --version` prints the binary that answered under the version line, so you can confirm
+it.
+
+Handover runs that install's own entry point, so its override handling, its emulation fallback and
+its diagnostics are the ones that apply. An install inside the repository that cannot produce a
+binary reports its own diagnostics; nothing falls back to a copy outside the repository, because the
+install that needs repairing is the local one.
 
 The binary is spawned with inherited standard input, output and error. The wrapper mirrors the
 child's exit code, and re-raises the child's fatal signal on itself so the parent shell sees

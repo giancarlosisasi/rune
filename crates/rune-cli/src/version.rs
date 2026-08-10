@@ -7,6 +7,24 @@
 /// The version `rune --version` prints.
 pub const VERSION: &str = first_line(include_str!("../../../version.txt"));
 
+/// What `rune --version` reports: the version, then the binary that answered.
+///
+/// A machine can have more than one rune within reach — a global install and the one a
+/// repository pins — and both print the same first line. Naming the file is how the
+/// question "which one am I running" is answered by asking rune instead of by inspecting
+/// the running process from outside it.
+///
+/// The first line keeps its exact form, so anything that reads it is unaffected.
+pub fn report() -> &'static str {
+  static REPORT: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+
+  REPORT.get_or_init(|| match std::env::current_exe() {
+    Ok(binary) => format!("{VERSION}\n{}", binary.display()),
+    // Nothing left to name, and a version query is not the place to fail over it.
+    Err(_) => VERSION.to_owned(),
+  })
+}
+
 /// The text before the first line ending, of either kind.
 ///
 /// A checkout on Windows turns the file's single newline into a carriage return and a

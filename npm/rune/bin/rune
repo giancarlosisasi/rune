@@ -26,9 +26,22 @@ function main() {
     platform: process.platform,
     arch: process.arch,
     env: process.env,
+    // The only place that reads process state, so resolution itself stays able to answer
+    // what another machine would do.
+    cwd: process.cwd(),
+    self: __filename,
     resolve: (specifier) => require.resolve(specifier),
     exists: (candidate) => fs.existsSync(candidate),
+    realpath: (candidate) => fs.realpathSync(candidate),
   });
+
+  // The repository's own install takes it from here, entry point and all, so its override
+  // handling, its diagnostics and its emulation fallback are the ones that apply. Silent:
+  // running the version a repository pinned is what the user meant.
+  if (resolution.handover) {
+    run(process.execPath, [resolution.handover, ...process.argv.slice(2)]);
+    return;
+  }
 
   if (resolution.failure) {
     process.stderr.write(diagnose(observe(resolution.failure)));
@@ -39,7 +52,7 @@ function main() {
     process.stderr.write(`warning: ${resolution.warning}\n`);
   }
 
-  run(resolution.path);
+  run(resolution.path, process.argv.slice(2));
 }
 
 // Everything the message needs that only the machine can answer. Gathered here, once,
@@ -68,8 +81,8 @@ function observe(failure) {
   };
 }
 
-function run(binary) {
-  const child = spawn(binary, process.argv.slice(2), { stdio: 'inherit' });
+function run(command, args) {
+  const child = spawn(command, args, { stdio: 'inherit' });
 
   // The terminal delivers an interrupt to the whole foreground group, so the binary has
   // it already and is shutting down; killing it from here would cut that short. A
@@ -80,7 +93,7 @@ function run(binary) {
   process.on('SIGTERM', forwardTermination);
 
   child.on('error', (error) => {
-    process.stderr.write(`rune could not run ${binary}: ${error.message}\n`);
+    process.stderr.write(`rune could not run ${command}: ${error.message}\n`);
     process.exit(1);
   });
 

@@ -40,19 +40,20 @@ jobs:
           echo "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' \
             || { echo "::error::'$VERSION' is not MAJOR.MINOR.PATCH"; exit 1; }
 
-      # `npm version` writes the meta package's manifest and then runs the `postversion`
-      # hook, which regenerates the six pins and `version.txt` from the platform table.
-      # Nothing here writes a version by hand, so nothing can drift.
+      # `npm version` writes the meta package's manifest. Nothing here writes a version by
+      # hand, so nothing can drift.
       - name: bump
         working-directory: npm/rune
         env:
           VERSION: ${{ inputs.version }}
         run: npm version "$VERSION" --no-git-tag-version
 
-      # The hook above is what a maintainer bumping locally relies on. Running it again
-      # here costs nothing — it derives everything from the manifest — and means the
-      # release does not depend on npm's lifecycle behaviour staying what it is today.
-      - run: node npm/scripts/bump-version.js
+      # The step that regenerates the six pins and `version.txt` from the platform table.
+      # This is the mechanism, not a safety net: the committed manifest also declares a
+      # `postversion` hook so a maintainer bumping locally gets the same result, but that
+      # hook is stripped from the published package and the release never relies on it.
+      - name: derive the pins and the version file
+        run: node npm/scripts/bump-version.js
 
       # `Cargo.toml` moved, and the lockfile records the workspace crates' own versions
       # beside every dependency's. `--workspace` limits the update to those entries: a

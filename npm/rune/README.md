@@ -52,6 +52,17 @@ in use.
 file that is not there, that is an error rather than a quiet fall back to the installed
 release.
 
+## Which copy runs
+
+The wrapper looks in this order: `RUNE_BINARY_PATH`, then a rune installed in the
+repository you are standing in, then this platform's package, then the x64 sibling under
+emulation on arm64.
+
+A rune installed globally therefore does not override the version a repository pins.
+Inside that repository the pinned copy runs — the same copy CI runs — and it happens
+without a word, because that is what you meant. `rune --version` prints the binary that
+answered under the version line when you want to check.
+
 ## License
 
 MIT

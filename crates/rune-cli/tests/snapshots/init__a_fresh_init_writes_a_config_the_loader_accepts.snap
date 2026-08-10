@@ -7,11 +7,12 @@ expression: generated
 // shared command changes here once instead of in every package.json.
 //
 // A script runs a `command` of its own, `extends` another one and adds to it, or runs
-// several others in `serial`:
+// several others in `serial` or in `parallel`:
 //
 //   build:    { command: "tsc -b" }
 //   build:ci: { extends: "build", appendArgs: ["--force"] }
 //   ci:       { serial: ["lint", "build:ci", "test"] }
+//   dev:      { parallel: ["dev:api", "dev:web"] }
 //
 // A group stops at the first member that fails and exits with that member's code; add
 // `continueOnError: true` to run the rest anyway. `dependsOn` puts other scripts before

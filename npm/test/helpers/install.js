@@ -20,9 +20,11 @@ function currentPlatform() {
 // for. That keeps one fixture working on every operating system — Windows will not run a
 // shell script and POSIX will not run an `.exe` — and it costs the tests only this: the
 // script the binary should run is the first argument the test passes.
-function fakeInstall({ present = [currentPlatform()] } = {}) {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'rune-install-'));
+function fakeInstall({ present = [currentPlatform()], at } = {}) {
+  const root = at ?? fs.mkdtempSync(path.join(os.tmpdir(), 'rune-install-'));
   const scope = path.join(root, 'node_modules', '@gio-labs');
+
+  fs.mkdirSync(root, { recursive: true });
 
   fs.mkdirSync(scope, { recursive: true });
   fs.cpSync(META_SOURCE, path.join(scope, 'rune'), { recursive: true });

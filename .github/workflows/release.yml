@@ -118,7 +118,8 @@ jobs:
             -v "$PWD/linux:/opt/rune-release:ro" ${{ matrix.image }} /opt/rune-release/rune --version)
 
           echo "$reported"
-          test "$reported" = "rune ${{ needs.plan.outputs.version }}"
+          # The first line only: the second names the binary inside the container.
+          test "$(echo "$reported" | head -n 1)" = "rune ${{ needs.plan.outputs.version }}"
 
   package:
     name: assemble and pack
