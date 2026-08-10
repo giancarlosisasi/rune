@@ -60,7 +60,7 @@ export default defineConfig({
 `rune run test` inside `packages/legacy` now runs the root command with the extra flag. Every other
 package is unchanged, and `packages/legacy/package.json` still says `rune run test`.
 
-An override may extend a script. It may not replace one. A package config that defines `test` with
+A package may narrow a script by extending it. It may not replace one. A package config that defines `test` with
 its own `command` is a validation error, because a name that means two different things across the
 repository is the duplication Rune removes. If the command really is different, give it a different
 name.
@@ -88,8 +88,8 @@ of definitions that produced them. It never spawns anything.
   bun: 'bun run --filter "*" rune list',
 }} />
 
-Each package prints the scripts visible to it, with `(overridden here)` next to the ones its own
-config sharpens.
+Each package prints the scripts visible to it, with `(narrowed here)` next to the ones its own
+config narrows.
 
 ## Next
 

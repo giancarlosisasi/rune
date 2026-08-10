@@ -1,0 +1,12 @@
+---
+source: crates/rune-config/tests/discovery.rs
+description: "no config above, and one in a subfolder"
+expression: "redact(dir.path(), &error.to_string())"
+---
+no rune.config.ts found
+
+searched [TMP], the top of this repository.
+
+there is one at src/deep/rune.config.ts, below the folder you are in.
+
+run rune from there, or move it up to where your project is rooted.

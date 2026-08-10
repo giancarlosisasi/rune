@@ -1,9 +1,9 @@
 ---
-title: 'Inheritance and overrides'
-description: 'How extends and appendArgs build a command from another script, and why a package override may only sharpen a root script.'
+title: 'Inheritance and narrowing'
+description: 'How extends and appendArgs build a command from another script, and why a package may only narrow a root script.'
 ---
 
-# Inheritance and overrides
+# Inheritance and narrowing
 
 Two mechanisms share one rule: a name means one command across the repository, and inheriting can
 only add to it.
@@ -55,7 +55,7 @@ script `x` extends `g`, which is a group
 the scripts it runs. To reuse a group, name it as a member of another group.
 ```
 
-## Package overrides
+## Narrowing in a package
 
 A package may hold its own `rune.config.ts`. Rune uses the nearest one it finds, so a script name
 defined in both resolves to the package's version.
@@ -89,10 +89,10 @@ and nothing would say so. A genuinely different command deserves a name of its o
 The reason is what the tool is for. A `test` that means one command in nine packages and something
 unrelated in the tenth reproduces the situation Rune removes, and it does it invisibly.
 
-A name that does not exist at the root is not an override. It is a new script, scoped to that
+A name that does not exist at the root narrows nothing. It is a new script, scoped to that
 package.
 
-### Ignoring the override
+### Ignoring what the package narrowed
 
 `--root` resolves against the root config only.
 
@@ -117,10 +117,10 @@ resolved through
 ```
 
 `rune list` annotates the same information more briefly: `(defined here)` for a script this package
-owns, `(overridden here)` for one it sharpens.
+owns, `(narrowed here)` for one it narrows.
 
 ## The cache and two configs
 
-The resolved config is cached by content. When a package override is in play, both configs and
+The resolved config is cached by content. When a package config is in play, both configs and
 everything they import enter the cache key, so editing either one invalidates the entry. See
 [Config evaluation](/config/evaluation).

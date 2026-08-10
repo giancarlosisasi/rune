@@ -40,6 +40,34 @@ test('6a.11 — every combination the format forbids is a type error, one by one
   remove(root);
 });
 
+// Each entry is one refusal and the sentence the compiler has to print for it. The
+// sentences are what the binary says for the same mistake, so a user who meets both reads
+// one explanation twice.
+const RULES = [
+  ['interactive on a group', 'a group is not a process: put interactive on the member that needs the terminal'],
+  ['command beside extends', 'a script is exactly one kind: keep command or extends, and remove the other'],
+  [
+    'successPolicy on a serial group',
+    'a serial group runs its members one at a time: successPolicy applies to a parallel group',
+  ],
+  [
+    'dependsOn on a group',
+    'a group runs the scripts it names and nothing before them: make what runs first the first member of a serial group',
+  ],
+];
+
+test('R7.2 — a refused field prints the rule it breaks, not the shape of the type', () => {
+  const root = project(['messages.ts']);
+  const reported = typecheck(root);
+
+  for (const [combination, rule] of RULES) {
+    assert.ok(reported.includes(rule), `${combination} was not explained:\n${reported}`);
+  }
+
+  assert.equal(new Set(RULES.map(([, rule]) => rule)).size, RULES.length, 'two refusals share a sentence');
+  remove(root);
+});
+
 test('an illegal combination that stops being illegal fails the suite', () => {
   const root = project([]);
   fs.writeFileSync(

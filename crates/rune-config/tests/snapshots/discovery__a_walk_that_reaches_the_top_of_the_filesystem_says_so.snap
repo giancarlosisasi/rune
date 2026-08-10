@@ -1,0 +1,12 @@
+---
+source: crates/rune-config/tests/discovery.rs
+description: "no config, and no repository anywhere above"
+expression: "redact(dir.path(), &error.to_string())"
+---
+no rune.config.ts found
+
+searched upward from [TMP]/work and reached the top of the filesystem without finding a repository.
+
+change into your project and run this again, or start a new one with:
+
+  rune init
