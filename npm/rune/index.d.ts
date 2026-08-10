@@ -21,8 +21,43 @@ export type PerOsCommand = {
 /** What a script may be asked to end with, before a kill follows. */
 export type KillSignal = 'SIGHUP' | 'SIGINT' | 'SIGQUIT' | 'SIGTERM' | 'SIGKILL';
 
-/** Marks fields that belong to another variant, so mixing two of them is a type error. */
-type Forbid<Keys extends string> = { [Key in Keys]?: never };
+/**
+ * Marks fields that belong to another variant, so mixing two of them is a type error.
+ *
+ * Each key is mapped to the rule it breaks, because the name of the type a value is not
+ * assignable to is the only text the compiler prints. Mapped to `never` the refusal reads
+ * "not assignable to type 'undefined'", which is a fact about how the union is built and
+ * not about rune. The sentences are the ones the binary uses for the same mistake.
+ */
+type Forbid<Rules extends Record<string, string>> = { [Key in keyof Rules]?: Rules[Key] };
+
+/** A group names other scripts. It runs no process of its own, so nothing describing one fits. */
+type NotOnAGroup = {
+  command: 'a group has no command of its own: it runs the scripts it names';
+  extends: 'a script is exactly one kind: it runs a command of its own, or it names other scripts to run';
+  appendArgs: 'appendArgs adds arguments to an inherited command, and a group inherits none';
+  dependsOn: 'a group runs the scripts it names and nothing before them: make what runs first the first member of a serial group';
+  timeout: 'a group is not a process: put timeout on the members it should apply to';
+  retries: 'a group is not a process: put retries on the members it should apply to';
+  retryDelay: 'a group is not a process: put retryDelay on the members it should apply to';
+  killSignal: 'a group is not a process: put killSignal on the members it should apply to';
+  killTimeout: 'a group is not a process: put killTimeout on the members it should apply to';
+  interactive: 'a group is not a process: put interactive on the member that needs the terminal';
+};
+
+/** A script that runs a process names no members, so nothing describing a group fits. */
+type NotOnARunner = {
+  serial: 'a script is exactly one kind: it runs a command of its own, or it names other scripts to run';
+  parallel: 'a script is exactly one kind: it runs a command of its own, or it names other scripts to run';
+  continueOnError: 'continueOnError decides whether the rest of a group runs after a member fails';
+  successPolicy: 'successPolicy picks which member a parallel group takes its result from';
+};
+
+/** The two group kinds differ by how they start their members, never by both being written. */
+type OneGroupKind = 'a group is serial or parallel: serial runs its members one at a time, parallel starts them together';
+
+/** A script runs a command of its own or builds on another one. Both is two scripts. */
+type OneRunnerKind = 'a script is exactly one kind: keep command or extends, and remove the other';
 
 interface Common {
   /** One line, shown by `rune list`. */
@@ -52,23 +87,15 @@ type Lifecycle = Retrying & {
   interactive?: boolean;
 };
 
-type GroupOnly = 'serial' | 'parallel' | 'continueOnError' | 'successPolicy';
-type RunnerOnly =
-  | 'command'
-  | 'extends'
-  | 'appendArgs'
-  | 'dependsOn'
-  | 'timeout'
-  | 'retries'
-  | 'retryDelay'
-  | 'killSignal'
-  | 'killTimeout'
-  | 'interactive';
-
 /** A script that runs a command of its own. */
 export type CommandScript = Common &
   Lifecycle &
-  Forbid<GroupOnly | 'extends' | 'appendArgs'> & {
+  Forbid<
+    NotOnARunner & {
+      extends: OneRunnerKind;
+      appendArgs: 'appendArgs adds arguments to an inherited command: a script with a command of its own writes its arguments into it';
+    }
+  > & {
     command: string | PerOsCommand;
     /** Scripts that run, in order, before this one. */
     dependsOn?: string[];
@@ -77,7 +104,7 @@ export type CommandScript = Common &
 /** A script that takes another one and adds to it. */
 export type ExtendsScript = Common &
   Lifecycle &
-  Forbid<GroupOnly | 'command'> & {
+  Forbid<NotOnARunner & { command: OneRunnerKind }> & {
     extends: string;
     /** Appended to the inherited command, after everything it already carries. */
     appendArgs?: string[];
@@ -86,7 +113,12 @@ export type ExtendsScript = Common &
 
 /** Scripts run one at a time, in the order written. */
 export type SerialScript = Common &
-  Forbid<RunnerOnly | 'parallel' | 'successPolicy'> & {
+  Forbid<
+    NotOnAGroup & {
+      parallel: OneGroupKind;
+      successPolicy: 'a serial group runs its members one at a time: successPolicy applies to a parallel group';
+    }
+  > & {
     serial: string[];
     /** Runs the rest after a member fails. The group still fails. */
     continueOnError?: boolean;
@@ -94,7 +126,7 @@ export type SerialScript = Common &
 
 /** Scripts run at the same time, their output attributed per script. */
 export type ParallelScript = Common &
-  Forbid<RunnerOnly | 'serial'> & {
+  Forbid<NotOnAGroup & { serial: OneGroupKind }> & {
     parallel: string[];
     continueOnError?: boolean;
     /** Which members have to succeed for the group to succeed. Defaults to `all`. */

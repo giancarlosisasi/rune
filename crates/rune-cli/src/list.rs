@@ -52,12 +52,13 @@ pub fn run() -> Result<(), String> {
 
 /// What a package config did to this entry, or nothing when it left it alone.
 ///
-/// Without these a developer reads the same list in two directories and assumes both
-/// mean the same thing everywhere, which is exactly what overrides make untrue.
+/// Without these a developer reads the same list in two directories and assumes both mean
+/// the same thing everywhere, which a package config makes untrue. The word is the rule's
+/// own: a package narrows a shared script and can never replace it.
 fn annotation(provenance: Provenance) -> Option<&'static str> {
   match provenance {
     Provenance::Root => None,
-    Provenance::Overridden => Some("(overridden here)"),
+    Provenance::Narrowed => Some("(narrowed here)"),
     Provenance::Package => Some("(defined here)"),
   }
 }
@@ -67,4 +68,23 @@ pub fn clear_cache() -> Result<(), String> {
   let discovered = discover(&working_directory()?).map_err(|error| error.to_string())?;
 
   cache::clear(&discovered.root).map_err(|error| format!("cannot clear the cache: {error}"))
+}
+
+#[cfg(test)]
+mod tests {
+  use rune_config::load::Provenance;
+
+  use super::annotation;
+
+  /// Test R7.4 — the annotations are the one place a user meets this vocabulary, so the
+  /// word the loader refuses cannot come back into them. "Override" is the ordinary word
+  /// for replacement, which is exactly what a package may not do.
+  #[test]
+  fn no_annotation_calls_a_narrowing_an_override() {
+    for provenance in [Provenance::Root, Provenance::Narrowed, Provenance::Package] {
+      let text = annotation(provenance).unwrap_or_default();
+
+      assert!(!text.contains("overrid"), "`{text}` teaches the rule the loader refuses");
+    }
+  }
 }

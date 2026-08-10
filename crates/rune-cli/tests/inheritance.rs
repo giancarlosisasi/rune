@@ -236,8 +236,10 @@ fn inspect_of_an_unknown_name_suggests_the_closest() {
     .run();
 }
 
-/// Test 4b.12 — the annotations that stop a developer reading one list and assuming it
-/// means the same thing in every directory.
+/// Test 4b.12 and R7.1 — the annotations that stop a developer reading one list and
+/// assuming it means the same thing in every directory, in the words of the rule they
+/// describe. A package narrows a shared script and can never replace it, so a listing
+/// that calls the result an override teaches the model the loader refuses.
 #[test]
 fn list_annotates_what_the_package_changed() {
   let root = r#"{
@@ -255,8 +257,16 @@ fn list_annotates_what_the_package_changed() {
     .status(0)
     .run_in("packages/legacy");
 
-  insta::with_settings!({ description => "listed from a package that overrides one script and defines one" }, {
-    insta::assert_snapshot!(String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n"));
+  let listing = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+
+  assert!(listing.contains("(narrowed here)"), "{listing}");
+  assert!(
+    !listing.contains("overrid"),
+    "the listing must not call a narrowing an override:\n{listing}"
+  );
+
+  insta::with_settings!({ description => "listed from a package that narrows one script and defines one" }, {
+    insta::assert_snapshot!(listing);
   });
 }
 

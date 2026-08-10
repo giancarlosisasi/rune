@@ -71,7 +71,7 @@ A missing default export, or one that is not an object, is an error naming the f
 
 A package may hold its own `rune.config.ts`. Rune uses the nearest one, and a script defined there
 may extend a root script but never replace it. See
-[Inheritance and overrides](/config/inheritance).
+[Inheritance and narrowing](/config/inheritance).
 
 ## Sections
 
@@ -79,8 +79,8 @@ may extend a root script but never replace it. See
   <Card title="Script types" href="/config/scripts">
     Every field a script entry accepts, and which combinations are legal.
   </Card>
-  <Card title="Inheritance and overrides" href="/config/inheritance">
-    extends, appendArgs, and the rule that an override may only sharpen.
+  <Card title="Inheritance and narrowing" href="/config/inheritance">
+    extends, appendArgs, and the rule that a package may only narrow.
   </Card>
   <Card title="Environment" href="/config/environment">
     env, envFile, PATH augmentation, and the precedence between them.

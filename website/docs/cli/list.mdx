@@ -1,6 +1,6 @@
 ---
 title: 'rune list'
-description: 'Print every script visible from the current directory, with descriptions and override annotations.'
+description: 'Print every script visible from the current directory, with descriptions and provenance annotations.'
 ---
 
 # rune list
@@ -31,7 +31,7 @@ $ cd packages/legacy && rune list
 build      Compile every package with tsc
 ci         Build, then test, then lint
 lint       Check formatting and lint rules
-test       Run unit tests                   (overridden here)
+test       Run unit tests                   (narrowed here)
 typecheck  Type-check the legacy sources    (defined here)
 ```
 
@@ -40,7 +40,7 @@ repository with no package configs keeps the two-column output above.
 
 | Annotation | Meaning |
 | --- | --- |
-| `(overridden here)` | This package extends a root script of the same name |
+| `(narrowed here)` | This package narrows a root script of the same name by extending it |
 | `(defined here)` | This package defines a script the root does not have |
 | none | Comes from the root config unchanged |
 

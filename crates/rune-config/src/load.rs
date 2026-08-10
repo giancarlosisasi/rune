@@ -55,8 +55,8 @@ pub enum LoadError {
 pub enum Provenance {
   /// The root config defines it and nothing here changes it.
   Root,
-  /// This package extends the root's definition.
-  Overridden,
+  /// This package narrows the root's definition by extending it.
+  Narrowed,
   /// This package defines it and the root does not.
   Package,
 }
@@ -95,7 +95,7 @@ impl Loaded {
     }
 
     if self.root_layer().config.scripts.contains_key(name) {
-      Provenance::Overridden
+      Provenance::Narrowed
     } else {
       Provenance::Package
     }
