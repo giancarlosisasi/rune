@@ -21,13 +21,20 @@ const DEFAULT_OUTPUT = path.join(__dirname, '..', 'dist');
 // working the file names out again from the version and the package names.
 const PACKED = 'packed.json';
 
+// The repository's single licence, staged into every package the way the readme already
+// is. Seven copies committed would be seven files to keep in step, and the one that drifts
+// is the one nobody reads. A manifest claiming a licence whose text is nowhere fails some
+// scanners outright and has to be explained to every security team that looks.
+const LICENSE_FILE = 'LICENSE';
+
 const EXECUTABLE = 0o755;
 
 function version() {
   return fs.readFileSync(path.join(WORKSPACE, 'version.txt'), 'utf8').split('\n')[0].trim();
 }
 
-// The meta package is copied as it is committed: what is here is what is published.
+// The meta package is copied as it is committed: what is here is what is published, minus
+// the one field that provably cannot work where it lands.
 function assembleMeta(outDirectory) {
   const target = path.join(outDirectory, 'rune');
   fs.rmSync(target, { recursive: true, force: true });
@@ -37,10 +44,24 @@ function assembleMeta(outDirectory) {
   for (const entry of manifest.files) {
     fs.cpSync(path.join(META_SOURCE, entry), path.join(target, entry), { recursive: true });
   }
-  fs.cpSync(path.join(META_SOURCE, 'package.json'), path.join(target, 'package.json'));
+
+  // The committed manifest keeps its scripts so a maintainer bumping locally still gets
+  // the derived pins. They name a path above the package root, which is not in the
+  // tarball, so published they could only ever fail — and a lifecycle script that cannot
+  // run is something a security team has to rule out before anyone installs anything.
+  delete manifest.scripts;
+  fs.writeFileSync(
+    path.join(target, 'package.json'),
+    `${JSON.stringify(manifest, null, 2)}\n`,
+  );
   fs.cpSync(path.join(META_SOURCE, 'README.md'), path.join(target, 'README.md'));
+  stageLicense(target);
 
   return target;
+}
+
+function stageLicense(target) {
+  fs.cpSync(path.join(WORKSPACE, LICENSE_FILE), path.join(target, LICENSE_FILE));
 }
 
 // A platform package is nothing but its generated manifest and the executable.
@@ -57,6 +78,7 @@ function assemblePlatform(outDirectory, entry, binaryPath, packageVersion) {
   const binary = path.join(target, platforms.BINARY_DIRECTORY, entry.binary);
   fs.copyFileSync(binaryPath, binary);
   fs.chmodSync(binary, EXECUTABLE);
+  stageLicense(target);
 
   return target;
 }
@@ -146,6 +168,7 @@ if (require.main === module) {
 }
 
 module.exports = {
+  LICENSE_FILE,
   PACKED,
   assembleMeta,
   assemblePlatform,
