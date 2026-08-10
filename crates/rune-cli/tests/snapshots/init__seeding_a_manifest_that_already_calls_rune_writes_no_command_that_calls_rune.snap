@@ -1,6 +1,6 @@
 ---
 source: crates/rune-cli/tests/init.rs
-description: "three npm scripts: a plain one, a name that is not an identifier, and a command carrying quotes"
+description: "a manifest whose every script already calls rune: sixteen naming themselves, four naming something else"
 expression: generated
 ---
 // Scripts for this repository, taken from package.json one for one. Every package runs
@@ -8,6 +8,17 @@ expression: generated
 //
 // Where several of these repeat the same command, keep one and let the others `extends`
 // it. That duplication is what rune exists to remove.
+//
+// These package.json scripts did nothing but call rune under their own name, so rune
+// already manages them and they are not repeated here:
+//
+//   build, build:apps, build:packages, check, ci, dev, dev:api, dev:packages, dev:web,
+//   lint, lint:fix, smoke, start, test, test:coverage, test:watch
+//
+// The scripts above stand for these names, and nothing here defines them. Add them, or
+// check the config they already live in:
+//
+//   clean:all, format:fix, typecheck:all
 //
 // A script runs a `command` of its own, `extends` another one and adds to it, or runs
 // several others in `serial` or in `parallel`:
@@ -41,14 +52,17 @@ expression: generated
 
 export default {
   scripts: {
-    build: {
-      command: "tsc -b",
+    clean: {
+      extends: "clean:all",
     },
-    lint: {
-      command: "eslint \"src/**/*.ts\"",
+    format: {
+      extends: "format:fix",
     },
-    "test:ci": {
-      command: "vitest run --reporter=dot",
+    "format:check": {
+      extends: "format",
+    },
+    typecheck: {
+      extends: "typecheck:all",
     },
   },
 };

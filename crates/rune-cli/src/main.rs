@@ -52,9 +52,13 @@ enum Command {
     #[arg(long)]
     root: bool,
   },
-  /// Write a starter rune.config.ts in the current directory
+  /// Write a starter rune.config.ts beside the nearest package.json
+  ///
+  /// The nearest package.json at or above this directory decides where the config goes,
+  /// so running from a subfolder still writes it where the rest of rune can see it. With
+  /// no package.json above, it is written here.
   Init {
-    /// Seed the starter with the scripts from the nearest package.json
+    /// Seed the starter with the scripts from that same package.json
     #[arg(long)]
     from_package_json: bool,
   },

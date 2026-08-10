@@ -28,15 +28,17 @@ const SEEDED_INTRO: &str = r"// Scripts for this repository, taken from package.
 
 /// What a script may hold in the version that generated the file.
 ///
-/// This is the part that dates. A change that adds a field to the schema decides here
-/// whether a new user should be shown it.
+/// This is the part that dates. A change that adds a field to the schema, or a kind to
+/// the script union, decides here whether a new user is shown it — and the snapshot over
+/// the generated text is what makes that decision impossible to skip.
 const GUIDE: &str = r#"//
 // A script runs a `command` of its own, `extends` another one and adds to it, or runs
-// several others in `serial`:
+// several others in `serial` or in `parallel`:
 //
 //   build:    { command: "tsc -b" }
 //   build:ci: { extends: "build", appendArgs: ["--force"] }
 //   ci:       { serial: ["lint", "build:ci", "test"] }
+//   dev:      { parallel: ["dev:api", "dev:web"] }
 //
 // A group stops at the first member that fails and exits with that member's code; add
 // `continueOnError: true` to run the rest anyway. `dependsOn` puts other scripts before
@@ -65,33 +67,64 @@ const GUIDE: &str = r#"//
 #[derive(Debug)]
 struct Entry<'a> {
   name: &'a str,
-  command: &'a str,
+  body: Body<'a>,
   description: Option<&'a str>,
+}
+
+/// What a generated script does.
+#[derive(Debug, Clone, Copy)]
+enum Body<'a> {
+  Command(&'a str),
+  /// A seeded `rune run <target>`: the entry stands for another name instead of starting
+  /// rune again to reach it.
+  Alias(&'a str),
 }
 
 /// The single script a starter config defines: enough to prove the install works, and
 /// small enough that its shape is the example.
 const STARTER_SCRIPT: Entry<'static> = Entry {
   name: "hello",
-  command: "echo rune is set up",
+  body: Body::Command("echo rune is set up"),
   description: Some("Check that rune can run a script"),
 };
 
-/// Writes a starter config into the directory rune was started in.
+/// What seeding a manifest produced: the scripts to write, and the two things the header
+/// has to say about what was left out.
+///
+/// A warning printed once, during a command run once, does not survive to the moment the
+/// script is run. The file is what survives, so the file carries both lists.
+#[derive(Debug, Default)]
+struct Seed<'a> {
+  entries: Vec<Entry<'a>>,
+  /// Names whose npm script only ran rune under that same name.
+  already_managed: Vec<&'a str>,
+  /// Alias targets nothing in the manifest defines, each named once.
+  unseen_targets: Vec<&'a str>,
+}
+
+/// Writes a starter config beside the nearest `package.json`, or where the user is
+/// standing when there is none.
+///
+/// One anchor serves the whole command. Writing where the terminal happens to be open
+/// while seeding from a manifest above it gave the command two ideas of where the project
+/// was, and a config below the root is invisible to the walk that looks for one — so the
+/// write succeeded and nothing could use it.
 pub fn run(from_package_json: bool) -> Result<(), String> {
-  let directory = working_directory()?;
+  let started_in = working_directory()?;
+  let manifest_path = nearest_package_json(&started_in);
+  let directory =
+    manifest_path.as_deref().and_then(Path::parent).map_or(started_in.clone(), Path::to_path_buf);
   let path = directory.join(CONFIG_FILE);
 
   // The manifest is read before anything is created, so a run that cannot find one
   // leaves the directory exactly as it was.
   let contents = if from_package_json {
-    let source =
-      nearest_package_json(&directory).ok_or_else(|| missing_package_json(&directory))?;
+    let source = manifest_path.ok_or_else(|| missing_package_json(&started_in))?;
     let manifest = read_manifest(&source)?;
 
     render(SEEDED_INTRO, &seeded(&manifest, &source)?)
   } else {
-    render(STARTER_INTRO, &[STARTER_SCRIPT])
+    render(STARTER_INTRO, &Seed { entries: vec![STARTER_SCRIPT], ..Seed::default() })
   };
 
   write_new(&path, &contents)?;
@@ -110,37 +143,80 @@ fn read_manifest(path: &Path) -> Result<serde_json::Value, String> {
     .map_err(|error| format!("{} is not valid JSON: {error}", path.display()))
 }
 
-/// Every `scripts` entry, unchanged.
+/// Every `scripts` entry, with the ones that only call rune read for what they name.
 ///
-/// Deliberately mechanical: nothing here tries to spot commands that repeat and factor
-/// them into an `extends` chain. Guessing which duplicates were intentional would produce
-/// a config the user has to audit line by line, which is more work than writing one.
-fn seeded<'a>(manifest: &'a serde_json::Value, source: &Path) -> Result<Vec<Entry<'a>>, String> {
+/// Deliberately mechanical otherwise: nothing here tries to spot commands that repeat and
+/// factor them into an `extends` chain. Guessing which duplicates were intentional would
+/// produce a config the user has to audit line by line, which is more work than writing
+/// one.
+fn seeded<'a>(manifest: &'a serde_json::Value, source: &Path) -> Result<Seed<'a>, String> {
   let Some(scripts) = manifest.get("scripts").and_then(serde_json::Value::as_object) else {
-    return Ok(Vec::new());
+    return Ok(Seed::default());
   };
 
-  scripts
-    .iter()
-    .map(|(name, command)| {
-      let command = command.as_str().ok_or_else(|| {
-        format!(
-          "`{name}` in {} is not a command\n\n\
-           an npm script is a string, and this one is not, so there is nothing to copy.",
-          source.display()
-        )
-      })?;
+  let mut seed = Seed::default();
+  for (name, command) in scripts {
+    let command = command.as_str().ok_or_else(|| {
+      format!(
+        "`{name}` in {} is not a command\n\n\
+         an npm script is a string, and this one is not, so there is nothing to copy.",
+        source.display()
+      )
+    })?;
 
-      Ok(Entry { name, command, description: None })
-    })
-    .collect()
+    let body = match redirection(command) {
+      // Reaching its own name leaves nothing to copy: the script would start rune to run
+      // the script that starts rune. Recording the name is the whole of what is left.
+      Some(target) if target == name => {
+        seed.already_managed.push(name);
+        continue;
+      }
+      Some(target) => {
+        if !scripts.contains_key(target) {
+          seed.unseen_targets.push(target);
+        }
+        Body::Alias(target)
+      }
+      None => Body::Command(command),
+    };
+
+    seed.entries.push(Entry { name, body, description: None });
+  }
+
+  seed.unseen_targets.sort_unstable();
+  seed.unseen_targets.dedup();
+
+  Ok(seed)
 }
 
-fn render(intro: &str, entries: &[Entry<'_>]) -> String {
+/// The script name a command redirects to, when the command is nothing but rune running
+/// one name.
+///
+/// Narrow on purpose. A command that chains rune with something else, or passes arguments
+/// of its own, still does what it says, so it is copied as written. The trailing separator
+/// is part of the shape because repositories wrote it to get arguments through a package
+/// manager.
+fn redirection(command: &str) -> Option<&str> {
+  let words: Vec<&str> = command.split_whitespace().collect();
+  let ["rune", "run", target, rest @ ..] = words.as_slice() else {
+    return None;
+  };
+
+  (matches!(rest, [] | ["--"]) && !target.starts_with('-')).then_some(*target)
+}
+
+fn render(intro: &str, seed: &Seed<'_>) -> String {
   let mut body = String::new();
-  for entry in entries {
+  for entry in &seed.entries {
     let _ = writeln!(body, "    {}: {{", key(entry.name));
-    let _ = writeln!(body, "      command: {},", literal(entry.command));
+    match entry.body {
+      Body::Command(command) => {
+        let _ = writeln!(body, "      command: {},", literal(command));
+      }
+      Body::Alias(target) => {
+        let _ = writeln!(body, "      extends: {},", literal(target));
+      }
+    }
     if let Some(description) = entry.description {
       let _ = writeln!(body, "      description: {},", literal(description));
     }
@@ -153,7 +229,58 @@ fn render(intro: &str, entries: &[Entry<'_>]) -> String {
     format!("  scripts: {{\n{body}  }},\n")
   };
 
-  format!("{intro}{GUIDE}\nexport default {{\n{scripts}}};\n")
+  format!("{intro}{}{GUIDE}\nexport default {{\n{scripts}}};\n", notes(seed))
+}
+
+/// The part of the header that reports what seeding did not copy, and what it could not
+/// account for.
+fn notes(seed: &Seed<'_>) -> String {
+  let mut notes = String::new();
+
+  if !seed.already_managed.is_empty() {
+    let _ = write!(
+      notes,
+      "//\n\
+       // These package.json scripts did nothing but call rune under their own name, so \
+       rune\n// already manages them and they are not repeated here:\n//\n{}\n",
+      listed(&seed.already_managed)
+    );
+  }
+
+  if !seed.unseen_targets.is_empty() {
+    let _ = write!(
+      notes,
+      "//\n\
+       // The scripts above stand for these names, and nothing here defines them. Add \
+       them, or\n// check the config they already live in:\n//\n{}\n",
+      listed(&seed.unseen_targets)
+    );
+  }
+
+  notes
+}
+
+/// `names` as indented comment lines, wrapped so the generated file stays readable.
+fn listed(names: &[&str]) -> String {
+  const WIDTH: usize = 88;
+  const INDENT: &str = "//   ";
+
+  let mut lines = vec![INDENT.to_owned()];
+  for (at, name) in names.iter().enumerate() {
+    let piece = format!("{name}{}", if at + 1 == names.len() { "" } else { "," });
+    let line = lines.last_mut().expect("the list starts with one line");
+
+    if line.len() == INDENT.len() {
+      line.push_str(&piece);
+    } else if line.len() + 1 + piece.len() > WIDTH {
+      lines.push(format!("{INDENT}{piece}"));
+    } else {
+      line.push(' ');
+      line.push_str(&piece);
+    }
+  }
+
+  lines.join("\n")
 }
 
 /// A script name as an object key: bare when it reads as an identifier, quoted otherwise.
@@ -223,7 +350,7 @@ fn missing_package_json(started_from: &Path) -> String {
 mod tests {
   use serde_json::json;
 
-  use super::{key, literal, render, seeded};
+  use super::{Body, Seed, key, literal, redirection, render, seeded};
 
   #[test]
   fn a_name_that_is_not_an_identifier_is_quoted() {
@@ -247,10 +374,10 @@ mod tests {
   fn a_package_without_scripts_seeds_nothing_rather_than_failing() {
     let manifest = json!({ "name": "fixture" });
 
-    let entries = seeded(&manifest, std::path::Path::new("package.json"))
+    let seed = seeded(&manifest, std::path::Path::new("package.json"))
       .expect("a package with no scripts is not an error");
 
-    assert!(entries.is_empty());
+    assert!(seed.entries.is_empty());
   }
 
   #[test]
@@ -265,8 +392,89 @@ mod tests {
   /// An empty `scripts` object still has to be an object the loader accepts.
   #[test]
   fn a_config_with_no_scripts_still_declares_the_object() {
-    let generated = render("// none\n", &[]);
+    let generated = render("// none\n", &Seed::default());
 
     assert!(generated.contains("scripts: {},"), "{generated}");
+  }
+
+  fn body_of<'a>(seed: &Seed<'a>, name: &str) -> Body<'a> {
+    seed
+      .entries
+      .iter()
+      .find(|entry| entry.name == name)
+      .unwrap_or_else(|| panic!("`{name}` is not in the generated config"))
+      .body
+  }
+
+  /// Test R4.7 — a command that only runs another script is a redirection. Copying it
+  /// writes a script that starts rune to reach a name rune could have reached itself.
+  #[test]
+  fn a_command_that_only_runs_another_script_becomes_an_alias_of_it() {
+    let manifest = json!({ "scripts": {
+      "clean": "rune run clean:all",
+      "format": "rune run format:fix --",
+    }});
+
+    let seed = seeded(&manifest, std::path::Path::new("package.json")).expect("both are strings");
+
+    assert!(matches!(body_of(&seed, "clean"), Body::Alias("clean:all")));
+    assert!(
+      matches!(body_of(&seed, "format"), Body::Alias("format:fix")),
+      "the trailing separator some repositories wrote is part of the shape"
+    );
+  }
+
+  /// The other half of R4.7: an entry that names itself has nothing left to copy, so the
+  /// file records the name instead of writing a script that reaches itself.
+  #[test]
+  fn a_command_that_runs_its_own_name_is_recorded_rather_than_written() {
+    let manifest = json!({ "scripts": { "build": "rune run build", "test": "vitest" } });
+
+    let seed = seeded(&manifest, std::path::Path::new("package.json")).expect("both are strings");
+
+    assert_eq!(seed.already_managed, ["build"]);
+    assert!(seed.entries.iter().all(|entry| entry.name != "build"));
+    assert!(matches!(body_of(&seed, "test"), Body::Command("vitest")));
+  }
+
+  /// An alias the manifest cannot account for is still written, and the header says which
+  /// ones. The target usually lives in a rune config the seeder never reads.
+  #[test]
+  fn an_alias_target_the_manifest_never_defines_is_named_once() {
+    let manifest = json!({ "scripts": {
+      "clean": "rune run clean:all",
+      "wipe": "rune run clean:all",
+      "format": "rune run format:fix",
+      "format:fix": "prettier --write .",
+    }});
+
+    let seed = seeded(&manifest, std::path::Path::new("package.json")).expect("all are strings");
+
+    assert_eq!(seed.unseen_targets, ["clean:all"]);
+  }
+
+  /// Test R4.8 — recognition is deliberately narrow. Anything that is not exactly rune
+  /// running one name still does what it says, so rewriting it would change what it does.
+  #[test]
+  fn anything_that_is_not_exactly_rune_running_one_name_is_copied_as_written() {
+    const COPIED: [&str; 7] = [
+      "rune run a && rune run b",
+      "rune run build --watch",
+      "rune run build -- --watch",
+      "npx rune run build",
+      "rune list",
+      "rune run",
+      "echo rune run build",
+    ];
+
+    for command in COPIED {
+      assert_eq!(redirection(command), None, "`{command}` is a command, not a redirection");
+    }
+
+    let manifest = json!({ "scripts": { "build": COPIED[0] } });
+
+    let seed = seeded(&manifest, std::path::Path::new("package.json")).expect("a string");
+
+    assert!(matches!(body_of(&seed, "build"), Body::Command(copied) if copied == COPIED[0]));
   }
 }
