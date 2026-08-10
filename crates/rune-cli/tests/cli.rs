@@ -13,7 +13,7 @@ use harness::Test;
 /// harness as the binary.
 #[test]
 fn version_is_printed_on_stdout() {
-  Test::new().args(["--version"]).stdout_regex(r"^rune \d+\.\d+\.\d+\n$").status(0).run();
+  Test::new().args(["--version"]).stdout_regex(r"^rune \d+\.\d+\.\d+\n").status(0).run();
 }
 
 /// Test 6a.13 — the printed version is the first line of the file the packaging step
@@ -25,7 +25,31 @@ fn version_is_the_first_line_of_the_file_the_packaging_step_writes() {
   // `lines` drops a carriage return of its own, which is the same trim the binary does.
   let expected = recorded.lines().next().expect("version.txt has a first line");
 
-  Test::new().args(["--version"]).stdout(&format!("rune {expected}\n")).status(0).run();
+  let output =
+    Test::new().args(["--version"]).stdout_regex(r"^rune \d+\.\d+\.\d+\n").status(0).run();
+  let stdout = String::from_utf8(output.stdout).expect("the version is utf-8");
+
+  assert_eq!(stdout.lines().next(), Some(format!("rune {expected}").as_str()));
+}
+
+/// Test R5.6 — which copy of rune is running is a question rune has to be able to answer
+/// about itself. Establishing it used to need sampling the process from outside the tool,
+/// which is no help to a developer whose machine quietly disagrees with everyone else's.
+///
+/// Compared as a path, not as a string: a temporary or short-name spelling of the same
+/// file is still the same file. A golden file would pin the test runner's layout instead.
+#[test]
+fn the_version_names_the_binary_that_answered() {
+  let output = Test::new().args(["--version"]).stdout_regex(r"(?s)^rune .*\n.+").status(0).run();
+  let stdout = String::from_utf8(output.stdout).expect("the version is utf-8");
+  let mut lines = stdout.lines();
+
+  assert_eq!(lines.next(), Some(format!("rune {}", env!("CARGO_PKG_VERSION")).as_str()));
+  harness::assert_same_path(
+    lines.next(),
+    &harness::binary(),
+    "the version query named a binary other than the one that ran",
+  );
 }
 
 /// Test 1.2 — help is reachable and names what the binary accepts. The exact text is

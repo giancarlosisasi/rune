@@ -5,6 +5,7 @@
 // be asked about without being one.
 
 const assert = require('node:assert/strict');
+const path = require('node:path');
 const test = require('node:test');
 
 const platforms = require('../rune/lib/platforms');
@@ -23,6 +24,21 @@ function installed(...specifiers) {
 
 const nothingExists = () => false;
 const everythingExists = () => true;
+
+// A filesystem holding exactly the listed paths, spelled the way this machine spells them.
+function tree(...paths) {
+  const known = new Set(paths.map((one) => path.resolve(one)));
+  return (candidate) => known.has(path.resolve(candidate));
+}
+
+// The entry point an install of the meta package presents, under `root`.
+function entryPointIn(root) {
+  return path.join(root, 'node_modules', '@gio-labs', 'rune', 'bin', 'rune');
+}
+
+const REPOSITORY = path.resolve('/work/repo');
+const ABOVE = path.resolve('/work');
+const asItself = (one) => one;
 
 test('the platform package is used when it is there', () => {
   const entry = platforms.entryFor('linux', 'x64');
@@ -118,4 +134,131 @@ test('an override naming nothing never falls through to the installed release', 
 
   assert.equal(resolution.failure.kind, 'override-missing');
   assert.equal(resolution.failure.path, '/home/dev/rune/target/debug/rune');
+});
+
+// R5.2, R5.3 and R5.4 — the repository-local step. It sits between the override and the
+// platform package, so everything below it has to stay exactly as it was.
+
+test('R5.2 — the install found is the copy already running, so there is nothing to hand over to', () => {
+  const self = entryPointIn(REPOSITORY);
+  const entry = platforms.entryFor('linux', 'x64');
+
+  const resolution = resolveBinary({
+    platform: 'linux',
+    arch: 'x64',
+    env: {},
+    cwd: path.join(REPOSITORY, 'packages', 'ui'),
+    self,
+    resolve: installed(platforms.specifier(entry)),
+    exists: tree(self),
+    realpath: asItself,
+  });
+
+  assert.equal(resolution.handover, undefined, 'handing over to itself never terminates');
+  assert.equal(resolution.path, `/node_modules/${platforms.specifier(entry)}`);
+});
+
+test('a copy reached from outside the repository hands over to the pinned one', () => {
+  const local = entryPointIn(REPOSITORY);
+
+  const resolution = resolveBinary({
+    platform: 'linux',
+    arch: 'x64',
+    env: {},
+    cwd: path.join(REPOSITORY, 'packages', 'ui'),
+    self: path.resolve('/usr/lib/node_modules/@gio-labs/rune/bin/rune'),
+    resolve: () => assert.fail('a handover resolves nothing itself'),
+    exists: tree(local),
+    realpath: asItself,
+  });
+
+  assert.equal(resolution.handover, local);
+});
+
+test('the nearest install wins, the way the config walk works', () => {
+  const nearest = entryPointIn(path.join(REPOSITORY, 'packages', 'ui'));
+
+  const resolution = resolveBinary({
+    platform: 'linux',
+    arch: 'x64',
+    env: {},
+    cwd: path.join(REPOSITORY, 'packages', 'ui', 'src'),
+    self: path.resolve('/usr/lib/node_modules/@gio-labs/rune/bin/rune'),
+    resolve: () => assert.fail('a handover resolves nothing itself'),
+    exists: tree(nearest, entryPointIn(REPOSITORY)),
+    realpath: asItself,
+  });
+
+  assert.equal(resolution.handover, nearest);
+});
+
+test('R5.4 — an install above the repository boundary is not reached into', () => {
+  const entry = platforms.entryFor('linux', 'x64');
+
+  const resolution = resolveBinary({
+    platform: 'linux',
+    arch: 'x64',
+    env: {},
+    cwd: path.join(REPOSITORY, 'packages', 'ui'),
+    self: path.resolve('/usr/lib/node_modules/@gio-labs/rune/bin/rune'),
+    resolve: installed(platforms.specifier(entry)),
+    exists: tree(path.join(REPOSITORY, '.git'), entryPointIn(ABOVE)),
+    realpath: asItself,
+  });
+
+  assert.equal(resolution.handover, undefined, 'the walk left the repository');
+  assert.equal(resolution.path, `/node_modules/${platforms.specifier(entry)}`);
+});
+
+test('an install at the repository root is found, boundary or not', () => {
+  const local = entryPointIn(REPOSITORY);
+
+  const resolution = resolveBinary({
+    platform: 'linux',
+    arch: 'x64',
+    env: {},
+    cwd: REPOSITORY,
+    self: path.resolve('/usr/lib/node_modules/@gio-labs/rune/bin/rune'),
+    resolve: () => assert.fail('a handover resolves nothing itself'),
+    exists: tree(local, path.join(REPOSITORY, '.git')),
+    realpath: asItself,
+  });
+
+  assert.equal(resolution.handover, local, 'a repository root normally holds both');
+});
+
+test('R5.3 — the override outranks a repository-local install', () => {
+  const resolution = resolveBinary({
+    platform: 'linux',
+    arch: 'x64',
+    env: { RUNE_BINARY_PATH: '/home/dev/rune/target/debug/rune' },
+    cwd: REPOSITORY,
+    self: path.resolve('/usr/lib/node_modules/@gio-labs/rune/bin/rune'),
+    resolve: () => assert.fail('resolution must not be reached'),
+    exists: everythingExists,
+    realpath: asItself,
+  });
+
+  assert.equal(resolution.path, '/home/dev/rune/target/debug/rune');
+  assert.equal(resolution.handover, undefined);
+});
+
+test('a symlinked install and the running copy are one file, so nothing is handed over', () => {
+  const linked = entryPointIn(REPOSITORY);
+  const store = path.resolve('/store/@gio-labs+rune@0.1.2/node_modules/@gio-labs/rune/bin/rune');
+  const entry = platforms.entryFor('linux', 'x64');
+
+  const resolution = resolveBinary({
+    platform: 'linux',
+    arch: 'x64',
+    env: {},
+    cwd: REPOSITORY,
+    self: store,
+    resolve: installed(platforms.specifier(entry)),
+    exists: tree(linked),
+    // What a package manager that links from a content-addressed store hands back.
+    realpath: (one) => (path.resolve(one) === linked ? store : one),
+  });
+
+  assert.equal(resolution.handover, undefined, 'the link and its target are the same install');
 });

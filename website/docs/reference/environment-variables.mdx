@@ -71,3 +71,7 @@ RUNE_BINARY_PATH=./target/release/rune pnpm test
 
 When the path is set and the file does not exist, the wrapper fails immediately rather than falling
 back, so a typo does not silently run the published binary instead of the local build.
+
+It outranks every other step, including the rune a repository installs for itself. Pointing at a
+build is a deliberate instruction and nothing overrules it quietly. See
+[Platforms](/reference/platforms) for the full order.
