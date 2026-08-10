@@ -1,0 +1,12 @@
+---
+source: crates/rune-config/tests/discovery.rs
+description: "no config, and the walk stopped at a repository"
+expression: "redact(dir.path(), &error.to_string())"
+---
+no rune.config.ts found
+
+searched upward from [TMP]/packages/ui and stopped at [TMP], the top of this repository.
+
+create one at the top of this repository with:
+
+  rune init

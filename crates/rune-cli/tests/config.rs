@@ -2,7 +2,7 @@
 
 mod harness;
 
-use harness::Test;
+use harness::{Test, redact};
 
 const CONFIG: &str = r#"
     const shared: string = "vitest";
@@ -51,15 +51,22 @@ fn list_is_identical_from_a_nested_directory() {
     .run_in("packages/foo");
 }
 
-/// Test 2.22 — the walk must stop at the boundary and say where it looked.
+/// Tests 2.22 and R8.4 — the walk must stop at the boundary and say where it looked.
+///
+/// Everything this message already does right is asserted apart from its wording, so a
+/// rewrite of the reason cannot quietly lose the directory, the stream or the exit code.
 #[test]
 fn no_config_anywhere_names_the_directory_and_suggests_init() {
-  Test::new()
+  let test = Test::new()
     .args(["list"])
     .stdout("")
     .stderr_regex(r"(?s)no rune\.config\.ts found.*rune init")
-    .status(1)
-    .run();
+    .status(1);
+
+  let output = test.run();
+  let reported = redact(test.dir(), &String::from_utf8_lossy(&output.stderr));
+
+  assert!(reported.contains("[TMP]"), "the message must name where it looked:\n{reported}");
 }
 
 /// Test 2.15 — on any load failure stdout stays empty. Once `run` spawns children,
