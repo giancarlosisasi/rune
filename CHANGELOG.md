@@ -1,6 +1,21 @@
 # Changelog
 
 Every notable change to rune.
+## 0.1.4 — 2026-08-10
+
+
+### Added
+
+- Write the config where the project is, and seed scripts that run
+- Run the rune a repository installs, whichever copy was reached
+- Name a package narrowing for what it is
+
+
+### Fixed
+
+- Ship the licence with every package and publish no scripts
+- Report the reason a config search actually ended with
+
 ## 0.1.3 — 2026-08-09
 
 
