@@ -255,6 +255,78 @@ fn either_configs_closure_invalidates_the_entry() {
   }
 }
 
+/// Test R9.4 — a config built from the whole environment depends on the whole
+/// environment.
+///
+/// Three states are asserted in one test because each only means something beside the
+/// others: an unchanged environment must still hit, or "it always misses" would pass;
+/// a changed variable must miss; and a variable that was not there before must miss too,
+/// which recording the names that were returned does not on its own catch.
+#[test]
+fn an_enumeration_invalidates_when_any_variable_changes() {
+  const SENTINEL: &str = "SENTINEL-NOT-FROM-EVALUATION";
+
+  let dir = fixture(&[
+    (".git/HEAD", "ref: refs/heads/main\n"),
+    (
+      "rune.config.ts",
+      "import { rune } from '@gio-labs/rune';\n\
+       export default { scripts: { test: { command: 'vitest --run', env: { ...rune.env } } } };\n",
+    ),
+  ]);
+  let before = Environment::from_pairs([("ALPHA", "1"), ("BETA", "2")]);
+
+  assert_eq!(command_with(dir.path(), &before), "vitest --run");
+  let entry = cache_entries(dir.path()).remove(0);
+
+  doctor(&entry, SENTINEL);
+  assert_eq!(command_with(dir.path(), &before), SENTINEL, "an unchanged environment must hit");
+
+  let changed = Environment::from_pairs([("ALPHA", "1"), ("BETA", "changed")]);
+  assert_eq!(
+    command_with(dir.path(), &changed),
+    "vitest --run",
+    "a variable the config never named by hand still changed what it was built from"
+  );
+
+  doctor(&entry, SENTINEL);
+  let added = Environment::from_pairs([("ALPHA", "1"), ("BETA", "changed"), ("GAMMA", "3")]);
+  assert_eq!(
+    command_with(dir.path(), &added),
+    "vitest --run",
+    "a variable that was not there when the config was evaluated is a change too"
+  );
+}
+
+/// Test R9.5 — the narrow key survives. Without this row, R9.4 could be bought by
+/// hashing the whole environment for every config, which is what makes a cache worthless.
+#[test]
+fn a_named_read_keeps_its_narrow_key() {
+  const SENTINEL: &str = "SENTINEL-NOT-FROM-EVALUATION";
+
+  let dir = fixture(&[
+    (".git/HEAD", "ref: refs/heads/main\n"),
+    (
+      "rune.config.ts",
+      "import { rune } from '@gio-labs/rune';\n\
+       export default { scripts: { test: { command: 'vitest --run', \
+       env: { WANTED: rune.env.WANTED ?? '' } } } };\n",
+    ),
+  ]);
+
+  assert_eq!(
+    command_with(dir.path(), &Environment::from_pairs([("WANTED", "yes"), ("IGNORED", "no")])),
+    "vitest --run"
+  );
+  doctor(&cache_entries(dir.path())[0], SENTINEL);
+
+  assert_eq!(
+    command_with(dir.path(), &Environment::from_pairs([("WANTED", "yes"), ("IGNORED", "other")])),
+    SENTINEL,
+    "an unrelated variable changing must not throw away a valid entry"
+  );
+}
+
 /// A config that never mentions `isCI` must not be invalidated by `CI` changing.
 #[test]
 fn an_unread_variable_does_not_invalidate() {

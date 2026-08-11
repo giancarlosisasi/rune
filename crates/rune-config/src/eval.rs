@@ -5,7 +5,6 @@
 //! Specifiers are turned into those keys by [`crate::resolve`] and nothing else.
 
 use std::cell::RefCell;
-use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
@@ -15,7 +14,7 @@ use rquickjs::{CatchResultExt, CaughtError, Context, Ctx, Module, Runtime, Value
 use thiserror::Error;
 
 use crate::builtin;
-use crate::env::{Environment, ObservedEnvironment};
+use crate::env::{Environment, Observations, ObservedEnvironment};
 use crate::globals::install;
 use crate::resolve::{ResolveError, canonical, resolve};
 use crate::strip::{StripError, strip_types};
@@ -119,12 +118,12 @@ fn read_and_strip(path: &Path) -> Result<String, EvalError> {
     .map_err(|errors| EvalError::Strip { path: path.to_owned(), errors })
 }
 
-/// What one evaluation produced: the config itself, plus the environment variables it
-/// read on the way. The cache key is built from the second part as much as the first.
+/// What one evaluation produced: the config itself, plus what it read of the environment
+/// on the way. The cache key is built from the second part as much as the first.
 #[derive(Debug)]
 pub struct Evaluated {
   pub value: serde_json::Value,
-  pub observed_env: BTreeMap<String, Option<String>>,
+  pub observed: Observations,
 }
 
 /// Evaluates `entry` and returns its default export as JSON.
@@ -164,7 +163,7 @@ pub fn evaluate_config(entry: &Path, environment: &Environment) -> Result<Evalua
       return Err(missing_default_export(&entry));
     }
 
-    Ok(Evaluated { value, observed_env: observed.observations() })
+    Ok(Evaluated { value, observed: observed.observations() })
   })
 }
 

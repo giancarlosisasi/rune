@@ -248,7 +248,7 @@ fn only_the_variables_the_config_read_are_observed() {
   let evaluated =
     evaluate_config(&dir.path().join("rune.config.ts"), &environment).expect("config evaluates");
 
-  assert_eq!(evaluated.observed_env.keys().collect::<Vec<_>>(), vec!["WANTED"]);
+  assert_eq!(evaluated.observed.values.keys().collect::<Vec<_>>(), vec!["WANTED"]);
 }
 
 /// Test 2.9 — the spec says frozen; this is what frozen has to mean in practice.

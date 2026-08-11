@@ -45,8 +45,12 @@ import { rune } from '@gio-labs/rune';
 const registry = rune.env.NPM_REGISTRY ?? 'https://registry.npmjs.org';
 ```
 
+A name is looked up the way the running system stores one, so `rune.env.PATH` answers on Windows,
+where the variable is spelled `Path`. Away from Windows the exact spelling is the one that answers.
+
 A variable the config read invalidates the cache when it changes. A variable it never read has no
-effect on caching.
+effect on caching. Enumerating the object — `Object.keys(rune.env)`, `{ ...rune.env }` — is a read of
+every variable, so a config built that way is re-evaluated whenever any of them changes.
 
 ## The reserved prefix
 

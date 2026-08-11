@@ -1,0 +1,10 @@
+---
+source: crates/rune-config/tests/rune_object.rs
+expression: "refusal(\"(rune as any).platform = 'linux';\\nexport default {};\\n\")"
+---
+Error: `rune.platform` is read-only.
+
+`rune` describes the machine this config is being evaluated on. Changing it would change what the config resolves with and not what is true.
+    at readOnly (eval_script)
+    at set (eval_script)
+    at <anonymous> ([TMP]/rune.config.ts:2:1)

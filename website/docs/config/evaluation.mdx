@@ -77,11 +77,23 @@ import { rune } from '@gio-labs/rune';
 export const reporter = rune.isCI ? ' --reporter=github' : '';
 ```
 
-Reads are recorded. A variable the config actually read enters the cache key; an unrelated variable
-changing does not throw away a valid entry.
+A name is read the way the running system stores one. Windows keeps the search path as `Path`, so
+`rune.env.PATH` answers there as it does everywhere else. On Linux and macOS two spellings are two
+variables, and only the exact one answers.
 
-Assignment throws. The object is frozen, and `env` is a proxy that rejects writes, so a config
-cannot change what Rune resolves with by mutating it.
+`rune.env` enumerates like any other object: `Object.keys`, `Object.entries`, `JSON.stringify` and
+the spread all see what `in` sees.
+
+```ts
+const child = { ...rune.env, NODE_ENV: 'test' };
+```
+
+Reads are recorded. A variable the config actually read enters the cache key; an unrelated variable
+changing does not throw away a valid entry. Enumerating reads everything, so a config built from the
+whole environment is re-evaluated whenever any part of it changes.
+
+Assignment throws. Nothing on `rune` can be set, deleted or redefined, and each refusal names the
+property and says why — a config cannot change what Rune resolves with by mutating it.
 
 Reading `rune` without importing it is an error that names the import, so a config written against
 an older version says what to add.

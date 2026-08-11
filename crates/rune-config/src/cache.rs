@@ -33,6 +33,11 @@ struct Entry {
   /// One value per config that took part, in the order they were evaluated.
   values: Vec<serde_json::Value>,
   env: BTreeMap<String, Option<String>>,
+  /// Set when a config asked for the whole environment. The names it saw are all in
+  /// `env`, so a change to any of them is already caught; what this adds is the one
+  /// change those names cannot describe, which is a variable arriving that was not
+  /// there when the config was built.
+  enumerated: bool,
 }
 
 pub struct Cache {
@@ -74,8 +79,10 @@ pub fn lookup(
   // The files are already proven identical by the key. The variables are not.
   let unchanged =
     stored.env.iter().all(|(name, seen)| environment.get(name).map(str::to_owned) == *seen);
+  let complete =
+    !stored.enumerated || environment.names().all(|name| stored.env.contains_key(name));
 
-  unchanged.then_some(stored.values)
+  (unchanged && complete).then_some(stored.values)
 }
 
 /// Best-effort write. A failure here costs a re-evaluation next time and nothing else.
@@ -91,10 +98,14 @@ pub fn store(cache: &Cache, entries: &[PathBuf], evaluated: &[Evaluated]) {
   // same value; the union is what the next lookup has to re-check.
   let mut env = BTreeMap::new();
   for one in evaluated {
-    env.extend(one.observed_env.iter().map(|(name, value)| (name.clone(), value.clone())));
+    env.extend(one.observed.values.iter().map(|(name, value)| (name.clone(), value.clone())));
   }
 
-  let stored = Entry { values: evaluated.iter().map(|one| one.value.clone()).collect(), env };
+  let stored = Entry {
+    values: evaluated.iter().map(|one| one.value.clone()).collect(),
+    env,
+    enumerated: evaluated.iter().any(|one| one.observed.enumerated),
+  };
   if let Ok(serialized) = serde_json::to_string(&stored) {
     let _ = std::fs::write(cache.entry_path(&key), serialized);
   }

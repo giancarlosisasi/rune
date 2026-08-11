@@ -156,8 +156,11 @@ export declare function defineConfig(config: RuneConfig): RuneConfig;
 
 /** What a config is allowed to know about the machine it is being read on. */
 export interface Rune {
-  /** Read access to the process environment. Reading a variable makes the cached result
-   *  depend on it; a variable never read never invalidates anything. */
+  /** Read access to the process environment. A name is looked up the way the running
+   *  system stores one: case-insensitively on Windows, exactly on Linux and macOS.
+   *  Reading a variable makes the cached result depend on it, and enumerating — a spread,
+   *  `Object.keys` — makes it depend on the whole environment. A variable never read
+   *  never invalidates anything. */
   readonly env: Readonly<Record<string, string | undefined>>;
   /** The running operating system, matching Node's `process.platform`. */
   readonly platform: 'win32' | 'darwin' | 'linux';
