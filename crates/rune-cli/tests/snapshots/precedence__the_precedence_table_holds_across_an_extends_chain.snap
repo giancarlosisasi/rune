@@ -3,9 +3,9 @@ source: crates/rune-cli/tests/precedence.rs
 description: a chain where every layer claims something
 expression: "reported.join(\"\\n\")"
 ---
-`PROCESS_AND_FILES` from `packages/legacy/.env` was ignored: the process environment already sets it
-`BOTH_FILES` from `.env` was ignored: `packages/legacy/.env` already sets it
-`PROCESS_AND_FILES` from `.env` was ignored: the process environment already sets it
-`MAP_BEATS_FILE` from `.env` was ignored: this script's `env` already sets it
-`RUNE_SCRIPT_NAME` from `.env` was ignored: `RUNE_` is reserved for rune's own variables
+`PROCESS_AND_FILES` on line 3 of `packages/legacy/.env` was ignored: the process environment already sets it
+`BOTH_FILES` on line 2 of `.env` was ignored: `packages/legacy/.env` already sets it
+`PROCESS_AND_FILES` on line 3 of `.env` was ignored: the process environment already sets it
+`MAP_BEATS_FILE` on line 4 of `.env` was ignored: this script's `env` already sets it
+`RUNE_SCRIPT_NAME` on line 5 of `.env` was ignored: `RUNE_` is reserved for rune's own variables
 `RUNE_ROOT` from this script's `env` was ignored: `RUNE_` is reserved for rune's own variables

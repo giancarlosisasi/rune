@@ -13,11 +13,12 @@ use std::fmt::Write as _;
 use std::path::PathBuf;
 
 use rune_config::env::PLATFORM;
+use rune_config::envfile::Files;
 use rune_config::inherit::{Link, Resolved, Runs, Scope};
 use rune_config::load::Loaded;
 use rune_config::paths::relative_to;
 use rune_config::schema::{Command, KillSignal, Lifecycle, RetryDelay, SuccessPolicy};
-use rune_exec::environment::{self, ChildEnvironment, Descriptor, Layering};
+use rune_exec::environment::{self, ChildEnvironment, Descriptor, FileLayer, Layering};
 use rune_exec::quote::{self, command_line};
 use rune_exec::shell::{SHELL_VARIABLE, Shell};
 
@@ -31,7 +32,11 @@ pub fn run(name: &str, scope: Scope) -> Result<(), String> {
     .map_err(|error| error.to_string())?
     .ok_or_else(|| unknown(name, &loaded, scope))?;
 
-  rune_out::line(&render(name, &resolved, &loaded));
+  // Read before anything is rendered: a report that describes an environment built from a
+  // file rune could not open would be an explanation of a run that cannot happen.
+  let files = env_files(&resolved, name, &loaded, &mut Files::default())?;
+
+  rune_out::line(&render(name, &resolved, &loaded, &files));
 
   Ok(())
 }
@@ -39,13 +44,13 @@ pub fn run(name: &str, scope: Scope) -> Result<(), String> {
 /// The width of the label column, so a value that spans lines stays under its own value.
 const LABEL: usize = 11;
 
-fn render(name: &str, resolved: &Resolved<'_>, loaded: &Loaded) -> String {
+fn render(name: &str, resolved: &Resolved<'_>, loaded: &Loaded, files: &[FileLayer]) -> String {
   let root = &loaded.discovered.root;
   let mut report = format!("{name}\n\n");
 
   // Before the command line, because the command line's escaping depends on which child
   // the script's own `PATH` resolves to.
-  let layering = layered(name, resolved, loaded);
+  let layering = layered(name, resolved, loaded, files);
 
   match resolved.runs {
     Runs::Command(command) => {
@@ -190,9 +195,7 @@ fn succeeds_if(policy: SuccessPolicy) -> &'static str {
 ///
 /// The same function `run` uses, against the same process environment, so what the report
 /// calls ignored is exactly what the run would drop.
-fn layered(name: &str, resolved: &Resolved<'_>, loaded: &Loaded) -> Layering {
-  let files = env_files(resolved);
-
+fn layered(name: &str, resolved: &Resolved<'_>, loaded: &Loaded, files: &[FileLayer]) -> Layering {
   environment::build(
     std::env::vars_os(),
     &Descriptor {
@@ -200,7 +203,7 @@ fn layered(name: &str, resolved: &Resolved<'_>, loaded: &Loaded) -> Layering {
       root: &loaded.discovered.root,
       package_dir: &loaded.discovered.package_dir,
       env: &resolved.env,
-      env_files: &files,
+      env_files: files,
     },
   )
 }

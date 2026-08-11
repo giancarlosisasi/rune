@@ -8,11 +8,12 @@ use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 
 use rune_config::env::Environment;
+use rune_config::envfile::Files;
 use rune_config::inherit::{Declared, Resolved, Scope};
 use rune_config::load::{Loaded, load};
 use rune_config::resolve::lexically_normalize;
 use rune_config::suggest::closest;
-use rune_exec::environment::FileLayer;
+use rune_exec::environment::{Assignment, FileLayer};
 
 /// Loads the configs that apply to the directory rune was started in.
 pub fn load_here() -> Result<Loaded, String> {
@@ -25,16 +26,40 @@ pub fn working_directory() -> Result<PathBuf, String> {
   std::env::current_dir().map_err(|error| format!("cannot read the working directory: {error}"))
 }
 
-/// A resolution's dotenv files, in the shape the layering reads them.
+/// Reads a resolution's dotenv files and hands them over in the shape the layering
+/// reads them.
 ///
 /// Shared by `run` and `inspect` so that the explanation and the run cannot disagree
-/// about which files took part or in what order.
-pub fn env_files<'a>(resolved: &Resolved<'a>) -> Vec<FileLayer<'a>> {
+/// about which files took part or in what order — and so that both read a file exactly
+/// when a script that declares it is reached. `list` comes nowhere near here: it needs
+/// names and descriptions, and it is the command a user runs when something is already
+/// broken.
+pub fn env_files(
+  resolved: &Resolved<'_>,
+  script: &str,
+  loaded: &Loaded,
+  files: &mut Files,
+) -> Result<Vec<FileLayer>, String> {
   resolved
     .env_files
     .iter()
-    .map(|file| FileLayer { source: &file.source, assignments: &file.assignments })
+    .map(|declared| {
+      let file =
+        files.read(&loaded.discovered.root, script, declared).map_err(|error| error.to_string())?;
+
+      Ok(FileLayer {
+        source: file.source.clone(),
+        assignments: file.assignments.iter().map(assignment).collect(),
+      })
+    })
     .collect()
+}
+
+/// The same assignment, spelled for the crate that layers it. rune-config describes what
+/// a file said; rune-exec decides what the child sees, and neither depends on the
+/// other's vocabulary.
+fn assignment(declared: &rune_config::envfile::Assignment) -> Assignment {
+  Assignment { name: declared.name.clone(), value: declared.value.clone(), line: declared.line }
 }
 
 /// Where a script runs: absolute values as given, relative ones against the config that

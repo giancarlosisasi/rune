@@ -16,7 +16,6 @@ use crate::cache::{self, Cache};
 use crate::compose::{self, ComposeError, Plan};
 use crate::discover::{Discovered, NotFound, discover};
 use crate::env::Environment;
-use crate::envfile::EnvFileError;
 use crate::eval::{EvalError, Evaluated, evaluate_config};
 use crate::inherit::{self, InheritError, Layer, Resolved, Scope};
 use crate::paths::relative_to;
@@ -45,9 +44,6 @@ pub enum LoadError {
 
   #[error(transparent)]
   Compose(#[from] ComposeError),
-
-  #[error(transparent)]
-  EnvFile(#[from] EnvFileError),
 }
 
 /// Where a script's definition came from, seen from the directory rune was run in.
@@ -182,7 +178,7 @@ pub fn load(start: &Path, environment: &Environment) -> Result<Loaded, LoadError
         source: error,
       })?;
 
-      Ok(Layer::new(&discovered.root, source.clone(), config)?)
+      Ok(Layer::new(source.clone(), config))
     })
     .collect::<Result<Vec<Layer>, LoadError>>()?;
 

@@ -14,29 +14,24 @@ use std::path::{Path, PathBuf};
 
 use thiserror::Error;
 
-use crate::envfile::{self, EnvFile, EnvFileError};
 use crate::schema::{Command, Config, Kind, Lifecycle, Script, SuccessPolicy};
 use crate::suggest::{closest, did_you_mean};
 
 /// One config taking part in resolution.
 #[derive(Debug, Clone)]
 pub struct Layer {
-  /// The config file, for naming a contribution in `inspect` output.
+  /// The config file. It names a contribution in `inspect` output, and it is the anchor
+  /// every relative path this config wrote is resolved against.
   pub source: PathBuf,
   pub config: Config,
-  /// The dotenv files this config's scripts declare, keyed by the path as written and
-  /// read once. Resolving them here is what makes a path mean what it means relative to
-  /// this file rather than relative to wherever the user happens to be standing.
-  pub env_files: BTreeMap<String, EnvFile>,
 }
 
 impl Layer {
-  /// Parses nothing and reads everything: the config is already typed, and this is where
-  /// the files it names are found and read.
-  pub fn new(root: &Path, source: PathBuf, config: Config) -> Result<Self, EnvFileError> {
-    let env_files = envfile::read_all(root, &source, &config)?;
-
-    Ok(Self { source, config, env_files })
+  /// Touches no filesystem. A layer holds what a config *said*; the files its scripts
+  /// name are read when a script that declares one is reached, so a file only one script
+  /// can use cannot stop every command.
+  pub fn new(source: PathBuf, config: Config) -> Self {
+    Self { source, config }
   }
 }
 
@@ -92,7 +87,9 @@ pub struct Resolved<'a> {
   ///
   /// Nearest first is the order they are consulted in, and it is the same rule every
   /// other field follows: what the extending script says wins over what it built on.
-  pub env_files: Vec<&'a EnvFile>,
+  /// Each travels with the config that declared it, because that is what a relative path
+  /// in it is relative to.
+  pub env_files: Vec<Declared<'a>>,
   /// The base first, then every script that built on it.
   pub chain: Vec<Link<'a>>,
 }
@@ -307,12 +304,7 @@ fn merge<'a>(layers: &'a [Layer], walked: &[Step<'a>]) -> Resolved<'a> {
     env.extend(script.env.iter().map(|(key, value)| (key.clone(), value.clone())));
 
     if let Some(declared) = &script.env_file {
-      env_files.push(
-        layers[*layer]
-          .env_files
-          .get(declared)
-          .expect("a layer reads every envFile its scripts declare when it is built"),
-      );
+      env_files.push(Declared { value: declared, source: &layers[*layer].source });
     }
 
     chain.push(Link { name, source: &layers[*layer].source, append_args: contributed });
@@ -337,7 +329,7 @@ fn merge<'a>(layers: &'a [Layer], walked: &[Step<'a>]) -> Resolved<'a> {
 
 #[cfg(test)]
 mod tests {
-  use std::path::{Path, PathBuf};
+  use std::path::PathBuf;
 
   use super::{InheritError, Layer, Resolved, Runs, Scope, resolve};
   use crate::schema::parse;
@@ -358,8 +350,7 @@ mod tests {
     let value: serde_json::Value =
       serde_json::from_str(&format!("{{ \"scripts\": {scripts} }}")).expect("valid fixture JSON");
 
-    Layer::new(Path::new(""), PathBuf::from(source), parse(&value).expect("fixture parses"))
-      .expect("no fixture here declares an envFile")
+    Layer::new(PathBuf::from(source), parse(&value).expect("fixture parses"))
   }
 
   fn root(scripts: &str) -> Vec<Layer> {

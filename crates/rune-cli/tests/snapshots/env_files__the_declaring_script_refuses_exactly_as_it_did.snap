@@ -1,0 +1,12 @@
+---
+source: crates/rune-cli/tests/env_files.rs
+description: the script that declares the missing file
+expression: "harness::redact(&directory, &stderr_of(&output))"
+---
+script `start` declares an envFile that does not exist
+
+  .env
+
+an `envFile` is resolved against the config that declares it, which is rune.config.ts.
+
+create the file, or remove `envFile` from the script.

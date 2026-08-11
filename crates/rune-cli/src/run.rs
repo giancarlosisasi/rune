@@ -13,6 +13,7 @@ use std::path::PathBuf;
 
 use rune_config::compose::Plan;
 use rune_config::env::PLATFORM;
+use rune_config::envfile::Files;
 use rune_config::inherit::{Runs, Scope};
 use rune_config::load::Loaded;
 use rune_config::paths::relative_to;
@@ -40,8 +41,9 @@ pub fn run(name: &str, arguments: &[String], scope: Scope) -> Result<Completion,
     loaded.plan(name, scope).map_err(stringify)?.ok_or_else(|| unknown(name, &loaded, scope))?;
 
   let run = Run { loaded: &loaded, scope, entry: name, arguments };
+  let mut files = Files::default();
   let mut commands = Vec::new();
-  prepare(&plan, &run, &mut commands)?;
+  prepare(&plan, &run, &mut files, &mut commands)?;
 
   let mut next = 0;
   let task = compose(&plan, &commands, &loaded, &mut next);
@@ -73,7 +75,7 @@ struct Prepared<'a> {
   directory: PathBuf,
   declared_in: Option<String>,
   env: BTreeMap<String, String>,
-  files: Vec<FileLayer<'a>>,
+  files: Vec<FileLayer>,
   interactive: bool,
   lifecycle: rune_exec::Lifecycle,
 }
@@ -95,18 +97,28 @@ impl Prepared<'_> {
   }
 }
 
-/// Resolves every command the plan can reach, in the order the plan holds them.
-fn prepare<'a>(plan: &Plan, run: &Run<'a>, into: &mut Vec<Prepared<'a>>) -> Result<(), String> {
+/// Resolves every command the plan can reach, in the order the plan holds them, and
+/// reads every dotenv file they name.
+///
+/// This is what makes a missing file on the third member of a chain refuse before the
+/// first member has run and had effects: the whole plan is prepared before any of it
+/// starts. `files` is shared across the plan, so a file four members name is opened once.
+fn prepare<'a>(
+  plan: &Plan,
+  run: &Run<'a>,
+  files: &mut Files,
+  into: &mut Vec<Prepared<'a>>,
+) -> Result<(), String> {
   match plan {
-    Plan::Command { script } => into.push(one(script, run)?),
+    Plan::Command { script } => into.push(one(script, run, files)?),
     Plan::Serial { steps, .. } => {
       for step in steps {
-        prepare(step, run, into)?;
+        prepare(step, run, files, into)?;
       }
     }
     Plan::Parallel { members, .. } => {
       for member in members {
-        prepare(&member.plan, run, into)?;
+        prepare(&member.plan, run, files, into)?;
       }
     }
   }
@@ -191,7 +203,7 @@ fn signal_of(signal: schema::KillSignal) -> rune_exec::KillSignal {
   }
 }
 
-fn one<'a>(script: &str, run: &Run<'a>) -> Result<Prepared<'a>, String> {
+fn one<'a>(script: &str, run: &Run<'a>, files: &mut Files) -> Result<Prepared<'a>, String> {
   let resolved = run
     .loaded
     .resolve(script, run.scope)
@@ -206,7 +218,7 @@ fn one<'a>(script: &str, run: &Run<'a>) -> Result<Prepared<'a>, String> {
     .select(PLATFORM);
   let discovered = &run.loaded.discovered;
   let interactive = resolved.interactive;
-  let files = env_files(&resolved);
+  let files = env_files(&resolved, script, run.loaded, files)?;
 
   let mut arguments = resolved.append_args;
   if script == run.entry {

@@ -226,7 +226,7 @@ fn render(path: &[String], repeated: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-  use std::path::{Path, PathBuf};
+  use std::path::PathBuf;
 
   use super::{ComposeError, Plan, plan, validate};
   use crate::inherit::{Layer, Scope};
@@ -236,14 +236,7 @@ mod tests {
     let value: serde_json::Value =
       serde_json::from_str(&format!("{{ \"scripts\": {scripts} }}")).expect("valid fixture JSON");
 
-    vec![
-      Layer::new(
-        Path::new(""),
-        PathBuf::from("rune.config.ts"),
-        parse(&value).expect("fixture parses"),
-      )
-      .expect("no fixture here declares an envFile"),
-    ]
+    vec![Layer::new(PathBuf::from("rune.config.ts"), parse(&value).expect("fixture parses"))]
   }
 
   fn planned(scripts: &str, name: &str) -> Plan {

@@ -76,12 +76,20 @@ impl ChildEnvironment {
   }
 }
 
+/// One assignment a dotenv file made, and the line it was written on.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Assignment {
+  pub name: String,
+  pub value: String,
+  pub line: usize,
+}
+
 /// One dotenv file's contribution, already read.
-pub struct FileLayer<'a> {
+pub struct FileLayer {
   /// The file, named the way rune's output names paths. A label rather than a path,
   /// because every warning prints it and an absolute path would bury the name.
-  pub source: &'a str,
-  pub assignments: &'a [(String, String)],
+  pub source: String,
+  pub assignments: Vec<Assignment>,
 }
 
 /// Where an assignment was written, or where a value already in place came from.
@@ -89,8 +97,8 @@ pub struct FileLayer<'a> {
 pub enum Origin {
   /// The environment rune itself was started with.
   Process,
-  /// A dotenv file the script declared.
-  File(String),
+  /// A dotenv file the script declared, and where in it.
+  File { source: String, line: usize },
   /// The script's own `env` map.
   ScriptEnv,
 }
@@ -114,26 +122,47 @@ impl fmt::Display for Origin {
   fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
     match self {
       Self::Process => write!(formatter, "the process environment"),
-      Self::File(source) => write!(formatter, "`{source}`"),
+      Self::File { source, .. } => write!(formatter, "`{source}`"),
       Self::ScriptEnv => write!(formatter, "this script's `env`"),
     }
   }
 }
 
-impl fmt::Display for Reason {
-  fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+impl Origin {
+  /// Where the assignment that lost was written. A file says which line, because that is
+  /// what a user needs to go and find it — the name alone appears twice in the case this
+  /// matters most.
+  fn written(&self) -> String {
     match self {
-      Self::AlreadySet(origin) => write!(formatter, "{origin} already sets it"),
-      Self::Reserved => {
-        write!(formatter, "`{RESERVED_PREFIX}` is reserved for rune's own variables")
-      }
+      Self::File { source, line } => format!("on line {line} of `{source}`"),
+      other => format!("from {other}"),
     }
   }
 }
 
 impl fmt::Display for Ignored {
   fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-    write!(formatter, "`{}` from {} was ignored: {}", self.name, self.source, self.reason)
+    write!(formatter, "`{}` {} was ignored: {}", self.name, self.source.written(), self.explain())
+  }
+}
+
+impl Ignored {
+  /// Why this assignment never reached the child.
+  ///
+  /// One file on both sides of the sentence is the same file said twice, which reads as
+  /// though rune has lost track of which is which. Naming it once and giving the two
+  /// lines is what a user can act on.
+  fn explain(&self) -> String {
+    let Reason::AlreadySet(winner) = &self.reason else {
+      return format!("`{RESERVED_PREFIX}` is reserved for rune's own variables");
+    };
+
+    match (winner, &self.source) {
+      (Origin::File { source: won, line }, Origin::File { source: lost, .. }) if won == lost => {
+        format!("line {line} of the same file already sets it")
+      }
+      _ => format!("{winner} already sets it"),
+    }
   }
 }
 
@@ -153,7 +182,7 @@ pub struct Descriptor<'a> {
   pub package_dir: &'a Path,
   pub env: &'a BTreeMap<String, String>,
   /// Nearest to the script first, which is the order they get to fill a gap in.
-  pub env_files: &'a [FileLayer<'a>],
+  pub env_files: &'a [FileLayer],
 }
 
 /// Builds the child's environment from the parent's.
@@ -174,8 +203,9 @@ where
   let mut ignored = Vec::new();
 
   for file in descriptor.env_files {
-    for (name, value) in file.assignments {
-      let source = Origin::File(file.source.to_owned());
+    for assignment in &file.assignments {
+      let name = &assignment.name;
+      let source = Origin::File { source: file.source.clone(), line: assignment.line };
 
       if is_reserved(name) {
         ignored.push(Ignored { name: name.clone(), source, reason: Reason::Reserved });
@@ -188,8 +218,8 @@ where
         continue;
       }
 
-      environment.set(name, value.as_str());
-      applied.insert(name.clone(), value.clone());
+      environment.set(name, assignment.value.as_str());
+      applied.insert(name.clone(), assignment.value.clone());
       owner.insert(lookup_key(name), source);
     }
   }
@@ -274,7 +304,9 @@ mod tests {
 
   #[cfg(unix)]
   use super::ChildEnvironment;
-  use super::{Descriptor, FileLayer, Origin, PACKAGE_DIR, ROOT, Reason, SCRIPT_NAME, build};
+  use super::{
+    Assignment, Descriptor, FileLayer, Origin, PACKAGE_DIR, ROOT, Reason, SCRIPT_NAME, build,
+  };
 
   fn root() -> PathBuf {
     if cfg!(windows) { PathBuf::from(r"C:\repo") } else { PathBuf::from("/repo") }
@@ -284,8 +316,21 @@ mod tests {
     pairs.iter().map(|(name, value)| (OsString::from(name), OsString::from(value))).collect()
   }
 
-  fn assignments(pairs: &[(&str, &str)]) -> Vec<(String, String)> {
-    pairs.iter().map(|(name, value)| ((*name).to_owned(), (*value).to_owned())).collect()
+  /// A file's assignments, numbered as a file numbers them: one per line, from one.
+  fn assignments(pairs: &[(&str, &str)]) -> Vec<Assignment> {
+    pairs
+      .iter()
+      .enumerate()
+      .map(|(index, (name, value))| Assignment {
+        name: (*name).to_owned(),
+        value: (*value).to_owned(),
+        line: index + 1,
+      })
+      .collect()
+  }
+
+  fn file(source: &str, pairs: &[(&str, &str)]) -> FileLayer {
+    FileLayer { source: source.to_owned(), assignments: assignments(pairs) }
   }
 
   fn map(pairs: &[(&str, &str)]) -> BTreeMap<String, String> {
@@ -372,8 +417,7 @@ mod tests {
     let root = root();
     let package = root.join("packages/foo");
     let empty = BTreeMap::new();
-    let assignments = assignments(&[("API_URL", "https://example.test"), ("CI", "false")]);
-    let files = [FileLayer { source: ".env", assignments: &assignments }];
+    let files = [file(".env", &[("API_URL", "https://example.test"), ("CI", "false")])];
 
     let layered = build(
       parent(&[("CI", "true")]),
@@ -385,7 +429,7 @@ mod tests {
 
     assert_eq!(layered.ignored.len(), 1, "{:?}", layered.ignored);
     assert_eq!(layered.ignored[0].name, "CI");
-    assert_eq!(layered.ignored[0].source, Origin::File(".env".to_owned()));
+    assert_eq!(layered.ignored[0].source, Origin::File { source: ".env".to_owned(), line: 2 });
     assert_eq!(layered.ignored[0].reason, Reason::AlreadySet(Origin::Process));
   }
 
@@ -397,8 +441,7 @@ mod tests {
     let root = root();
     let package = root.join("packages/foo");
     let env = map(&[("RUNE_PACKAGE_DIR", "elsewhere")]);
-    let assignments = assignments(&[("RUNE_ROOT", "elsewhere")]);
-    let files = [FileLayer { source: ".env", assignments: &assignments }];
+    let files = [file(".env", &[("RUNE_ROOT", "elsewhere")])];
 
     let layered =
       build(parent(&[]), &Descriptor { env_files: &files, ..descriptor(&root, &package, &env) });
@@ -410,7 +453,10 @@ mod tests {
       layered.ignored.iter().map(|one| (one.name.as_str(), &one.source)).collect();
     assert_eq!(
       refused,
-      [("RUNE_ROOT", &Origin::File(".env".to_owned())), ("RUNE_PACKAGE_DIR", &Origin::ScriptEnv),]
+      [
+        ("RUNE_ROOT", &Origin::File { source: ".env".to_owned(), line: 1 }),
+        ("RUNE_PACKAGE_DIR", &Origin::ScriptEnv),
+      ]
     );
     assert!(layered.ignored.iter().all(|one| one.reason == Reason::Reserved));
   }

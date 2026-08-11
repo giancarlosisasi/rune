@@ -1,0 +1,11 @@
+---
+source: crates/rune-config/tests/env_files.rs
+description: an env file saved as UTF-16
+expression: error
+---
+.env is UTF-16, and rune reads env files as UTF-8
+
+save it as UTF-8 in your editor, or convert it in place:
+
+  on Windows: powershell -Command "(Get-Content .env) | Set-Content -Encoding utf8 .env"
+  elsewhere:  iconv -f UTF-16 -t UTF-8 .env > converted && mv converted .env

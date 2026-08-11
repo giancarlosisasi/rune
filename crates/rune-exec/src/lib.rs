@@ -54,7 +54,7 @@ pub struct ExecRequest<'a> {
   pub directory: Directory<'a>,
   pub env: &'a BTreeMap<String, String>,
   /// The script's dotenv files, nearest to the script first.
-  pub env_files: &'a [FileLayer<'a>],
+  pub env_files: &'a [FileLayer],
   /// The script owns the terminal even inside a group, and its siblings stay piped.
   ///
   /// Outside a group this changes nothing — a lone script already has the terminal. It is

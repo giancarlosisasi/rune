@@ -9,8 +9,8 @@ command      vitest
 directory    .
 environment  API_URL=https://example.test
              FOO=map
-ignored      `CI` from `.env` was ignored: the process environment already sets it
-             `FOO` from `.env` was ignored: this script's `env` already sets it
+ignored      `CI` on line 2 of `.env` was ignored: the process environment already sets it
+             `FOO` on line 3 of `.env` was ignored: this script's `env` already sets it
              `RUNE_ROOT` from this script's `env` was ignored: `RUNE_` is reserved for rune's own variables
 
 resolved through

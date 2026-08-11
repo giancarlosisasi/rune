@@ -15,9 +15,10 @@ use std::ffi::{OsStr, OsString};
 use std::fs;
 
 use rune_config::env::Environment;
+use rune_config::envfile::Files;
 use rune_config::inherit::Scope;
 use rune_config::load::load;
-use rune_exec::environment::{self, Descriptor, FileLayer, Layering};
+use rune_exec::environment::{self, Assignment, Descriptor, FileLayer, Layering};
 use tempfile::TempDir;
 
 /// The root's shared definition. Its `env` covers the three cases a map takes part in:
@@ -98,10 +99,27 @@ fn the_precedence_table_holds_across_an_extends_chain() {
     .expect("both configs and both files load");
   let resolved = loaded.resolve("test", Scope::Nearest).expect("resolves").expect("defined");
 
-  let files: Vec<FileLayer<'_>> = resolved
+  let mut read = Files::default();
+  let files: Vec<FileLayer> = resolved
     .env_files
     .iter()
-    .map(|file| FileLayer { source: &file.source, assignments: &file.assignments })
+    .map(|declared| {
+      let file =
+        read.read(&loaded.discovered.root, "test", declared).expect("both files are there");
+
+      FileLayer {
+        source: file.source.clone(),
+        assignments: file
+          .assignments
+          .iter()
+          .map(|assignment| Assignment {
+            name: assignment.name.clone(),
+            value: assignment.value.clone(),
+            line: assignment.line,
+          })
+          .collect(),
+      }
+    })
     .collect();
 
   let layering: Layering = environment::build(
