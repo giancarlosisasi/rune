@@ -92,7 +92,7 @@ fn the_file_that_did_not_finish_is_the_one_named() {
   let reported = redact(test.dir(), &stderr_of(&test.run()));
 
   assert!(
-    reported.contains("[TMP]/scripts/helpers.ts"),
+    reported.trim_start().starts_with("scripts/helpers.ts"),
     "the helper is where the engine was, and it is what the message must name:\n{reported}"
   );
 }

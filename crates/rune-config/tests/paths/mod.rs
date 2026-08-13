@@ -8,10 +8,6 @@
 //! the snapshot and fails on every other one.
 //!
 //! This lived as four near-identical copies until all four failed on macOS at once.
-//!
-//! The same rule covers positions inside rune's own bootstrap: a snapshot is here for the
-//! sentence, and a line number in a file no user can open is noise that moves whenever
-//! that file is edited.
 
 use std::path::{Path, PathBuf};
 
@@ -24,29 +20,6 @@ pub fn redact(dir: &Path, text: &str) -> String {
   }
 
   replace_each(&spellings, text)
-}
-
-/// Frames from rune's own setup keep their shape and lose their position.
-///
-/// The sentence is what these snapshots exist for. Pinning the line numbers of a file no
-/// user can open would make every edit to it look like a change to the message.
-pub fn without_internal_positions(text: &str) -> String {
-  const FRAME: &str = "eval_script:";
-
-  let mut kept = String::with_capacity(text.len());
-  let mut rest = text;
-
-  while let Some(start) = rest.find(FRAME) {
-    kept.push_str(&rest[..start]);
-    kept.push_str("eval_script");
-
-    let position = &rest[start + FRAME.len()..];
-    let end = position.find(|c: char| !c.is_ascii_digit() && c != ':').unwrap_or(position.len());
-    rest = &position[end..];
-  }
-  kept.push_str(rest);
-
-  kept
 }
 
 /// Longest spelling first, and that ordering is the whole of the correctness here.
@@ -75,16 +48,6 @@ fn replace_each(spellings: &[PathBuf], text: &str) -> String {
   }
 
   redacted.replace('\\', "/")
-}
-
-/// The frame keeps its name, so a message that gained or lost one still shows in a
-/// snapshot. Only the position — which moves whenever the bootstrap is edited — goes.
-#[test]
-fn an_internal_frame_keeps_its_name_and_loses_its_position() {
-  assert_eq!(
-    without_internal_positions("thrown\n    at get (eval_script:83:27)\n    at x (a.ts:1:1)"),
-    "thrown\n    at get (eval_script)\n    at x (a.ts:1:1)"
-  );
 }
 
 /// The macOS case, written out so the ordering rule cannot be lost again. Both spellings

@@ -1,0 +1,9 @@
+---
+source: crates/rune-config/tests/config_errors.rs
+description: a stray brace in an imported helper
+expression: failure(&dir)
+---
+scripts/helpers.ts:3:24
+  Unexpected token
+
+  3 | export const broken = {;

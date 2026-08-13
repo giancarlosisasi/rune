@@ -1,0 +1,11 @@
+---
+source: crates/rune-config/tests/config_errors.rs
+description: a string longer than the engine can build
+expression: failure(&dir)
+---
+rune.config.ts failed while it was being evaluated as a rune config
+
+invalid repeat count
+
+    at repeat (native)
+    at <anonymous> (rune.config.ts:1:21)

@@ -34,9 +34,10 @@ fn helper_import_is_inlined_into_the_command() {
     ),
   ]);
 
-  let config = evaluate_config(&dir.path().join("rune.config.ts"), &Environment::default())
-    .expect("config evaluates")
-    .value;
+  let config =
+    evaluate_config(dir.path(), &dir.path().join("rune.config.ts"), &Environment::default())
+      .expect("config evaluates")
+      .value;
 
   assert_eq!(config["scripts"]["dev"]["command"], "vite --port 4000");
 }
@@ -49,9 +50,10 @@ fn npm_value_import_names_the_specifier_and_explains_the_engine() {
     "import { padStart } from 'lodash';\nexport default { value: padStart };\n",
   )]);
 
-  let error = evaluate_config(&dir.path().join("rune.config.ts"), &Environment::default())
-    .unwrap_err()
-    .to_string();
+  let error =
+    evaluate_config(dir.path(), &dir.path().join("rune.config.ts"), &Environment::default())
+      .unwrap_err()
+      .to_string();
 
   insta::with_settings!({ description => "npm value import" }, {
     insta::assert_snapshot!(redact(dir.path(), &error));
@@ -68,9 +70,10 @@ fn type_only_npm_import_is_erased_and_the_config_loads() {
      export default { scripts: { dev } };\n",
   )]);
 
-  let config = evaluate_config(&dir.path().join("rune.config.ts"), &Environment::default())
-    .expect("config evaluates")
-    .value;
+  let config =
+    evaluate_config(dir.path(), &dir.path().join("rune.config.ts"), &Environment::default())
+      .expect("config evaluates")
+      .value;
 
   assert_eq!(config["scripts"]["dev"]["command"], "vite");
 }
@@ -85,9 +88,10 @@ fn define_config_is_supplied_by_the_binary_rather_than_by_node_modules() {
      export default defineConfig({ scripts: { dev: { command: 'vite' } } });\n",
   )]);
 
-  let config = evaluate_config(&dir.path().join("rune.config.ts"), &Environment::default())
-    .expect("config evaluates")
-    .value;
+  let config =
+    evaluate_config(dir.path(), &dir.path().join("rune.config.ts"), &Environment::default())
+      .expect("config evaluates")
+      .value;
 
   assert_eq!(config["scripts"]["dev"]["command"], "vite");
 }
@@ -103,9 +107,10 @@ fn the_supplied_module_offers_nothing_beyond_define_config_and_rune() {
      export default { scripts: { dev: { command: somethingElse } } };\n",
   )]);
 
-  let error = evaluate_config(&dir.path().join("rune.config.ts"), &Environment::default())
-    .unwrap_err()
-    .to_string();
+  let error =
+    evaluate_config(dir.path(), &dir.path().join("rune.config.ts"), &Environment::default())
+      .unwrap_err()
+      .to_string();
 
   assert!(error.contains("somethingElse"), "{error}");
 }
@@ -115,9 +120,10 @@ fn the_supplied_module_offers_nothing_beyond_define_config_and_rune() {
 fn missing_relative_import_names_the_file_and_its_importer() {
   let dir = fixture(&[("rune.config.ts", "import { x } from './nope';\nexport default { x };\n")]);
 
-  let error = evaluate_config(&dir.path().join("rune.config.ts"), &Environment::default())
-    .unwrap_err()
-    .to_string();
+  let error =
+    evaluate_config(dir.path(), &dir.path().join("rune.config.ts"), &Environment::default())
+      .unwrap_err()
+      .to_string();
 
   insta::with_settings!({ description => "missing relative import" }, {
     insta::assert_snapshot!(redact(dir.path(), &error));
@@ -137,9 +143,10 @@ fn an_import_cycle_terminates() {
     ),
   ]);
 
-  let config = evaluate_config(&dir.path().join("rune.config.ts"), &Environment::default())
-    .expect("a cycle still evaluates")
-    .value;
+  let config =
+    evaluate_config(dir.path(), &dir.path().join("rune.config.ts"), &Environment::default())
+      .expect("a cycle still evaluates")
+      .value;
 
   assert_eq!(config, serde_json::json!({ "a": "a", "b": "b" }));
 }
@@ -152,9 +159,10 @@ fn dynamic_import_is_rejected_with_the_cache_reason() {
     ("rune.config.ts", "const m = import('./h');\nexport default { m };\n"),
   ]);
 
-  let error = evaluate_config(&dir.path().join("rune.config.ts"), &Environment::default())
-    .unwrap_err()
-    .to_string();
+  let error =
+    evaluate_config(dir.path(), &dir.path().join("rune.config.ts"), &Environment::default())
+      .unwrap_err()
+      .to_string();
 
   assert!(error.contains("dynamic `import()`"), "{error}");
   assert!(error.contains("stale"), "the cache-integrity reason is missing:\n{error}");
@@ -178,9 +186,10 @@ fn every_specifier_form_resolves() {
     ),
   ]);
 
-  let config = evaluate_config(&dir.path().join("nested/rune.config.ts"), &Environment::default())
-    .expect("config evaluates")
-    .value;
+  let config =
+    evaluate_config(dir.path(), &dir.path().join("nested/rune.config.ts"), &Environment::default())
+      .expect("config evaluates")
+      .value;
 
   assert_eq!(
     config,
@@ -202,9 +211,10 @@ fn both_path_separators_reach_one_module_instance() {
     ),
   ]);
 
-  let config = evaluate_config(&dir.path().join("rune.config.ts"), &Environment::default())
-    .expect("config evaluates")
-    .value;
+  let config =
+    evaluate_config(dir.path(), &dir.path().join("rune.config.ts"), &Environment::default())
+      .expect("config evaluates")
+      .value;
 
   assert_eq!(config["sameInstance"], true);
 }
@@ -219,8 +229,8 @@ fn the_imported_rune_object_reports_the_environment() {
   )]);
   let environment = Environment::from_pairs([("CI", "1"), ("MY_TOKEN", "abc123")]);
 
-  let evaluated =
-    evaluate_config(&dir.path().join("rune.config.ts"), &environment).expect("config evaluates");
+  let evaluated = evaluate_config(dir.path(), &dir.path().join("rune.config.ts"), &environment)
+    .expect("config evaluates");
 
   let expected_platform = if cfg!(windows) {
     "win32"
@@ -245,8 +255,8 @@ fn only_the_variables_the_config_read_are_observed() {
   )]);
   let environment = Environment::from_pairs([("WANTED", "yes"), ("IGNORED", "no")]);
 
-  let evaluated =
-    evaluate_config(&dir.path().join("rune.config.ts"), &environment).expect("config evaluates");
+  let evaluated = evaluate_config(dir.path(), &dir.path().join("rune.config.ts"), &environment)
+    .expect("config evaluates");
 
   assert_eq!(evaluated.observed.values.keys().collect::<Vec<_>>(), vec!["WANTED"]);
 }
@@ -263,7 +273,7 @@ fn the_imported_rune_object_cannot_be_reassigned() {
   )]);
   let environment = Environment::from_pairs([("CI", "real")]);
 
-  let config = evaluate_config(&dir.path().join("rune.config.ts"), &environment)
+  let config = evaluate_config(dir.path(), &dir.path().join("rune.config.ts"), &environment)
     .expect("config evaluates")
     .value;
 
@@ -290,8 +300,8 @@ fn a_relative_import_can_read_the_environment_too() {
   ]);
   let environment = Environment::from_pairs([("CI", "1")]);
 
-  let evaluated =
-    evaluate_config(&dir.path().join("rune.config.ts"), &environment).expect("config evaluates");
+  let evaluated = evaluate_config(dir.path(), &dir.path().join("rune.config.ts"), &environment)
+    .expect("config evaluates");
 
   assert_eq!(evaluated.value["reporter"], "github");
 }
@@ -302,9 +312,10 @@ fn a_relative_import_can_read_the_environment_too() {
 fn reading_rune_without_importing_it_names_the_import() {
   let dir = fixture(&[("rune.config.ts", "export default { platform: rune.platform };\n")]);
 
-  let error = evaluate_config(&dir.path().join("rune.config.ts"), &Environment::default())
-    .unwrap_err()
-    .to_string();
+  let error =
+    evaluate_config(dir.path(), &dir.path().join("rune.config.ts"), &Environment::default())
+      .unwrap_err()
+      .to_string();
 
   assert!(error.contains("rune"), "the unavailable name is not reported:\n{error}");
   assert!(
@@ -320,9 +331,10 @@ fn node_apis_fail_with_a_message_listing_what_is_available() {
   for api in ["require", "process", "fs"] {
     let dir = fixture(&[("rune.config.ts", &format!("export default {{ value: {api} }};\n"))]);
 
-    let error = evaluate_config(&dir.path().join("rune.config.ts"), &Environment::default())
-      .unwrap_err()
-      .to_string();
+    let error =
+      evaluate_config(dir.path(), &dir.path().join("rune.config.ts"), &Environment::default())
+        .unwrap_err()
+        .to_string();
 
     assert!(error.contains(api), "`{api}` is not named:\n{error}");
     assert!(error.contains("rune.env"), "`{api}` does not list what works:\n{error}");
@@ -338,11 +350,12 @@ fn node_apis_fail_with_a_message_listing_what_is_available() {
 fn refusal_for(name: &str) -> String {
   let dir = fixture(&[("rune.config.ts", &format!("export default {{ value: {name} }};\n"))]);
 
-  let error = evaluate_config(&dir.path().join("rune.config.ts"), &Environment::default())
-    .expect_err("the name must be refused")
-    .to_string();
+  let error =
+    evaluate_config(dir.path(), &dir.path().join("rune.config.ts"), &Environment::default())
+      .expect_err("the name must be refused")
+      .to_string();
 
-  paths::without_internal_positions(&redact(dir.path(), &error))
+  redact(dir.path(), &error)
 }
 
 /// Test R12.1 — the first thing anyone types when a computed command comes out wrong.
@@ -420,8 +433,9 @@ fn a_config_declaring_its_own_console_is_unaffected() {
      export default { value: console.log('kept') };\n",
   )]);
 
-  let evaluated = evaluate_config(&dir.path().join("rune.config.ts"), &Environment::default())
-    .expect("evaluates");
+  let evaluated =
+    evaluate_config(dir.path(), &dir.path().join("rune.config.ts"), &Environment::default())
+      .expect("evaluates");
 
   assert_eq!(evaluated.value["value"], "kept");
 }
@@ -437,9 +451,10 @@ fn an_enum_member_value_reaches_the_resolved_command() {
      export default { scripts: { dev: { command: `vite --port ${Port.Dev}` } } };\n",
   )]);
 
-  let config = evaluate_config(&dir.path().join("rune.config.ts"), &Environment::default())
-    .expect("config evaluates")
-    .value;
+  let config =
+    evaluate_config(dir.path(), &dir.path().join("rune.config.ts"), &Environment::default())
+      .expect("config evaluates")
+      .value;
 
   assert_eq!(config["scripts"]["dev"]["command"], "vite --port 5173");
 }
@@ -452,9 +467,10 @@ fn a_missing_or_non_object_default_export_names_the_file() {
   {
     let dir = fixture(&[("rune.config.ts", source)]);
 
-    let error = evaluate_config(&dir.path().join("rune.config.ts"), &Environment::default())
-      .unwrap_err()
-      .to_string();
+    let error =
+      evaluate_config(dir.path(), &dir.path().join("rune.config.ts"), &Environment::default())
+        .unwrap_err()
+        .to_string();
 
     assert!(error.contains("rune.config.ts"), "the file is not named:\n{error}");
     assert!(error.contains("export default"), "no guidance given:\n{error}");
@@ -483,9 +499,10 @@ fn a_throwing_config_reports_the_original_typescript_line() {
     ),
   ]);
 
-  let error = evaluate_config(&dir.path().join("rune.config.ts"), &Environment::default())
-    .unwrap_err()
-    .to_string();
+  let error =
+    evaluate_config(dir.path(), &dir.path().join("rune.config.ts"), &Environment::default())
+      .unwrap_err()
+      .to_string();
 
   assert!(error.contains("helper exploded"), "{error}");
   assert!(

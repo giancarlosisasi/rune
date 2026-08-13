@@ -2,9 +2,10 @@
 source: crates/rune-config/tests/rune_object.rs
 expression: "refusal(\"delete (rune as any).platform;\\nexport default {};\\n\")"
 ---
-Error: `rune.platform` is read-only.
+rune.config.ts failed while it was being evaluated as a rune config
+
+`rune.platform` is read-only.
 
 `rune` describes the machine this config is being evaluated on. Changing it would change what the config resolves with and not what is true.
-    at readOnly (eval_script)
-    at deleteProperty (eval_script)
-    at <anonymous> ([TMP]/rune.config.ts:2:1)
+
+    at <anonymous> (rune.config.ts:2:1)

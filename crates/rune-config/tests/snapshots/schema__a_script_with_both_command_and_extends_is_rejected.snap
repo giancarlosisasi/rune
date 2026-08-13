@@ -3,7 +3,7 @@ source: crates/rune-config/tests/schema.rs
 description: a script declaring command and extends together
 expression: error
 ---
-[TMP]/rune.config.ts is not a valid rune config
+rune.config.ts is not a valid rune config
 
 script `ci` sets both `command` and `extends`
 

@@ -136,12 +136,13 @@ impl Loaded {
 /// Evaluates every config that takes part and records them under one cache key.
 fn evaluate_all(
   cache: &Cache,
+  root: &Path,
   entries: &[PathBuf],
   environment: &Environment,
 ) -> Result<Vec<serde_json::Value>, EvalError> {
   let evaluated = entries
     .iter()
-    .map(|entry| evaluate_config(entry, environment))
+    .map(|entry| evaluate_config(root, entry, environment))
     .collect::<Result<Vec<Evaluated>, EvalError>>()?;
 
   cache::store(cache, entries, &evaluated);
@@ -166,7 +167,7 @@ pub fn load(start: &Path, environment: &Environment) -> Result<Loaded, LoadError
 
   let values = match cache::lookup(&cache, &entries, environment) {
     Some(cached) => cached,
-    None => evaluate_all(&cache, &entries, environment)?,
+    None => evaluate_all(&cache, &discovered.root, &entries, environment)?,
   };
 
   let layers = entries
@@ -174,7 +175,7 @@ pub fn load(start: &Path, environment: &Environment) -> Result<Loaded, LoadError
     .zip(values)
     .map(|(source, value)| {
       let config = parse(&value).map_err(|error| LoadError::Schema {
-        path_display: source.display().to_string(),
+        path_display: relative_to(&discovered.root, source),
         source: error,
       })?;
 

@@ -8,7 +8,7 @@ mod paths;
 
 use std::fs;
 
-use paths::{redact, without_internal_positions};
+use paths::redact;
 use rune_config::env::Environment;
 use rune_config::eval::evaluate_config;
 use tempfile::TempDir;
@@ -25,7 +25,7 @@ const IMPORT: &str = "import { rune } from '@gio-labs/rune';\n";
 fn exported(source: &str, environment: &Environment) -> serde_json::Value {
   let dir = fixture(&format!("{IMPORT}{source}"));
 
-  evaluate_config(&dir.path().join("rune.config.ts"), environment)
+  evaluate_config(dir.path(), &dir.path().join("rune.config.ts"), environment)
     .expect("the config evaluates")
     .value
 }
@@ -34,11 +34,12 @@ fn exported(source: &str, environment: &Environment) -> serde_json::Value {
 fn refusal(source: &str) -> String {
   let dir = fixture(&format!("{IMPORT}{source}"));
 
-  let error = evaluate_config(&dir.path().join("rune.config.ts"), &Environment::default())
-    .expect_err("the mutation must be refused")
-    .to_string();
+  let error =
+    evaluate_config(dir.path(), &dir.path().join("rune.config.ts"), &Environment::default())
+      .expect_err("the mutation must be refused")
+      .to_string();
 
-  without_internal_positions(&redact(dir.path(), &error))
+  redact(dir.path(), &error)
 }
 
 /// Test R9.1 — the name a config spells has to find the variable the platform stores.
@@ -101,9 +102,12 @@ fn the_object_still_carries_exactly_three_members() {
   let dir =
     fixture(&format!("{IMPORT}export default {{ keys: Object.keys(rune), ci: rune.isCI }};\n"));
 
-  let evaluated =
-    evaluate_config(&dir.path().join("rune.config.ts"), &Environment::from_pairs([("CI", "1")]))
-      .expect("the config evaluates");
+  let evaluated = evaluate_config(
+    dir.path(),
+    &dir.path().join("rune.config.ts"),
+    &Environment::from_pairs([("CI", "1")]),
+  )
+  .expect("the config evaluates");
 
   assert_eq!(evaluated.value["keys"], serde_json::json!(["env", "platform", "isCI"]));
   assert_eq!(evaluated.value["ci"], true);
@@ -165,8 +169,9 @@ fn no_refusal_is_left_in_the_engines_words() {
 fn rebinding_the_import_is_refused_by_the_engine() {
   let dir = fixture(&format!("{IMPORT}rune = {{}} as any;\nexport default {{}};\n"));
 
-  let error = evaluate_config(&dir.path().join("rune.config.ts"), &Environment::default())
-    .expect_err("rebinding an import must be refused");
+  let error =
+    evaluate_config(dir.path(), &dir.path().join("rune.config.ts"), &Environment::default())
+      .expect_err("rebinding an import must be refused");
 
   assert!(error.to_string().contains("rune"), "the refusal must name the binding: {error}");
 }

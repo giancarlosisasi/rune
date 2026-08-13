@@ -1,0 +1,16 @@
+---
+source: crates/rune-config/tests/config_errors.rs
+description: a specifier that resolves to nothing
+expression: failure(&dir)
+---
+cannot find `./nowhere` imported from scripts/inner.ts
+
+tried:
+  scripts/nowhere
+  scripts/nowhere.ts
+  scripts/nowhere/index.ts
+
+imports followed to get here:
+  rune.config.ts
+  scripts/helpers.ts
+  scripts/inner.ts

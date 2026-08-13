@@ -18,47 +18,57 @@ use crate::builtin;
 use crate::env::{Environment, Observations, ObservedEnvironment};
 use crate::globals::install;
 use crate::limits::{self, Limits};
+use crate::paths::Shown;
 use crate::resolve::{ResolveError, canonical, resolve};
-use crate::strip::{StripError, strip_types};
+use crate::strip::{StripError, specifiers_importing, strip_types};
 
+/// Everything that can stop a config being loaded.
+///
+/// Every variant names a file, and none of them hands on the words of the engine, the
+/// parser, the standard library or the operating system as the whole of what is printed.
+/// These are read by someone who wrote a config, not by someone who wrote rune.
 #[derive(Debug, Error)]
 pub enum EvalError {
-  #[error("{0}")]
-  Resolve(#[from] ResolveError),
+  #[error("{source}{}", format_chain(.chain))]
+  Resolve { source: Box<ResolveError>, chain: Vec<Shown> },
 
-  #[error("cannot read {}: {source}", .path.display())]
-  Unreadable { path: PathBuf, source: std::io::Error },
+  #[error("cannot read {path}: {source}")]
+  Unreadable { path: Shown, source: std::io::Error },
 
-  #[error("{}:\n{}", .path.display(), format_strip_errors(.errors))]
-  Strip { path: PathBuf, errors: Vec<StripError> },
-
-  #[error("{message}")]
-  Runtime { message: String },
+  #[error("{}", format_strip_errors(.path, .errors))]
+  Strip { path: Shown, errors: Vec<StripError> },
 
   #[error(
-    "{} did not finish being evaluated within {} ms\n\n\
+    "{importer} imports `{name}` from `{specifier}`, which does not export it{}",
+    format_chain(.chain)
+  )]
+  MissingExport { importer: Shown, specifier: String, name: String, chain: Vec<Shown> },
+
+  #[error("{}", format_runtime(.path, .message, .trace))]
+  Runtime { path: Shown, message: String, trace: String },
+
+  #[error(
+    "{path} did not finish being evaluated within {} ms\n\n\
      rune evaluates a config to completion before any script starts, so work that waits or \
      loops without end never finishes and no rune command in this repository can run.\n\n\
      set {} higher for a config that genuinely needs longer.",
-    .path.display(),
     .limit.as_millis(),
     limits::TIME_VARIABLE
   )]
-  TimeLimit { path: PathBuf, limit: Duration },
+  TimeLimit { path: Shown, limit: Duration },
 
   #[error(
-    "{} asked for more memory than a config may use while it is evaluated: the limit is {} MB\n\n\
+    "{path} asked for more memory than a config may use while it is evaluated: the limit is \
+     {limit_mb} MB\n\n\
      rune stops here itself so that the operating system does not stop it instead, which ends \
      the process with nothing on screen.\n\n\
      set {} higher for a config that genuinely needs more.",
-    .path.display(),
-    .limit_mb,
     limits::MEMORY_VARIABLE
   )]
-  MemoryLimit { path: PathBuf, limit_mb: u64 },
+  MemoryLimit { path: Shown, limit_mb: u64 },
 
-  #[error("{}: {message}", .path.display())]
-  Shape { path: PathBuf, message: String },
+  #[error("{path}: {message}")]
+  Shape { path: Shown, message: String },
 }
 
 impl EvalError {
@@ -68,12 +78,48 @@ impl EvalError {
   }
 }
 
-fn format_strip_errors(errors: &[StripError]) -> String {
-  let mut listed = String::new();
-  for error in errors {
-    listed.push_str("  ");
-    listed.push_str(&error.message);
-    listed.push('\n');
+/// One block per problem, each headed by the position editors and terminals both linkify.
+fn format_strip_errors(path: &Shown, errors: &[StripError]) -> String {
+  errors
+    .iter()
+    .map(|error| match &error.position {
+      Some(at) => format!(
+        "{path}:{}:{}\n  {}\n\n  {} | {}",
+        at.line, at.column, error.message, at.line, at.text
+      ),
+      None => format!("{path}:\n  {}", error.message),
+    })
+    .collect::<Vec<_>>()
+    .join("\n\n")
+}
+
+/// The engine's sentence, with rune's around it.
+///
+/// The inner sentence is often the most informative part — `cannot read property 'f' of
+/// undefined` says exactly what happened — and it is useless on its own because it names
+/// no file.
+fn format_runtime(path: &Shown, message: &str, trace: &str) -> String {
+  let mut text =
+    format!("{path} failed while it was being evaluated as a rune config\n\n{message}");
+
+  if !trace.trim().is_empty() {
+    text.push_str("\n\n");
+    text.push_str(trace.trim_end());
+  }
+  text
+}
+
+/// The imports followed to reach the file the message is about, when that took more than
+/// the config itself.
+fn format_chain(chain: &[Shown]) -> String {
+  if chain.len() < 2 {
+    return String::new();
+  }
+
+  let mut listed = String::from("\n\nimports followed to get here:");
+  for step in chain {
+    listed.push_str("\n  ");
+    listed.push_str(&step.to_string());
   }
   listed
 }
@@ -85,8 +131,33 @@ fn format_strip_errors(errors: &[StripError]) -> String {
 /// error, and the JavaScript exception becomes a fallback rather than the only copy.
 type ErrorSlot = Rc<RefCell<Option<EvalError>>>;
 
+/// One `import`, as the resolver saw it: who wrote it, what they wrote, and the module key
+/// it became.
+///
+/// The engine keeps none of this. It is what lets a failure name the file that wrote the
+/// import rather than the module that refused it.
+struct Edge {
+  importer: PathBuf,
+  specifier: String,
+  key: String,
+}
+
+type Imports = Rc<RefCell<Vec<Edge>>>;
+
 struct PathResolver {
   slot: ErrorSlot,
+  imports: Imports,
+  entry: Shown,
+}
+
+impl PathResolver {
+  fn record(&self, base: &str, specifier: &str, key: &str) {
+    self.imports.borrow_mut().push(Edge {
+      importer: PathBuf::from(base),
+      specifier: specifier.to_owned(),
+      key: key.to_owned(),
+    });
+  }
 }
 
 impl Resolver for PathResolver {
@@ -99,14 +170,20 @@ impl Resolver for PathResolver {
   ) -> rquickjs::Result<String> {
     // The one specifier that is its own key: there is no file behind it to canonicalize.
     if builtin::is_builtin(name) {
+      self.record(base, name, name);
       return Ok(name.to_owned());
     }
 
-    match resolve(Path::new(base), name) {
-      Ok(path) => Ok(path.to_string_lossy().into_owned()),
+    match resolve(self.entry.root(), Path::new(base), name) {
+      Ok(path) => {
+        let key = path.to_string_lossy().into_owned();
+        self.record(base, name, &key);
+        Ok(key)
+      }
       Err(error) => {
         let message = error.to_string();
-        self.slot.borrow_mut().replace(EvalError::Resolve(error));
+        let chain = chain_to(&self.imports.borrow(), base, &self.entry);
+        self.slot.borrow_mut().replace(EvalError::Resolve { source: Box::new(error), chain });
         Err(rquickjs::Error::new_resolving_message(base, name, message))
       }
     }
@@ -115,6 +192,7 @@ impl Resolver for PathResolver {
 
 struct StrippingLoader {
   slot: ErrorSlot,
+  entry: Shown,
 }
 
 impl Loader for StrippingLoader {
@@ -129,7 +207,7 @@ impl Loader for StrippingLoader {
     }
 
     let path = Path::new(name);
-    match read_and_strip(path) {
+    match read_and_strip(self.entry.root(), path) {
       Ok(code) => Module::declare(ctx.clone(), name, code),
       Err(error) => {
         let message = error.to_string();
@@ -140,13 +218,31 @@ impl Loader for StrippingLoader {
   }
 }
 
-fn read_and_strip(path: &Path) -> Result<String, EvalError> {
+/// The imports followed from the entry config down to `key`, entry first.
+///
+/// A config graph may hold cycles, which are legal, so the walk stops at a file it has
+/// already passed rather than following the circle.
+fn chain_to(edges: &[Edge], key: &str, entry: &Shown) -> Vec<Shown> {
+  let mut walked = vec![key.to_owned()];
+
+  while let Some(edge) = edges.iter().find(|edge| edge.key == walked[walked.len() - 1]) {
+    let importer = edge.importer.to_string_lossy().into_owned();
+    if walked.contains(&importer) {
+      break;
+    }
+    walked.push(importer);
+  }
+
+  walked.iter().rev().map(|step| entry.sibling(Path::new(step))).collect()
+}
+
+fn read_and_strip(root: &Path, path: &Path) -> Result<String, EvalError> {
   let source = std::fs::read_to_string(path)
-    .map_err(|source| EvalError::Unreadable { path: path.to_owned(), source })?;
+    .map_err(|source| EvalError::Unreadable { path: Shown::new(root, path), source })?;
 
   strip_types(&source, path)
     .map(|stripped| stripped.code)
-    .map_err(|errors| EvalError::Strip { path: path.to_owned(), errors })
+    .map_err(|errors| EvalError::Strip { path: Shown::new(root, path), errors })
 }
 
 /// What one evaluation produced: the config itself, plus what it read of the environment
@@ -161,34 +257,43 @@ pub struct Evaluated {
 ///
 /// Relative imports are followed recursively through the same pipeline. Non-relative
 /// specifiers used for a runtime value are an error: there is no npm resolution here.
-pub fn evaluate_config(entry: &Path, environment: &Environment) -> Result<Evaluated, EvalError> {
-  let entry = canonical(entry)?;
-  let code = read_and_strip(&entry)?;
+/// `root` is the repository the config belongs to, and decides only how the files a
+/// failure names are spelled.
+pub fn evaluate_config(
+  root: &Path,
+  entry: &Path,
+  environment: &Environment,
+) -> Result<Evaluated, EvalError> {
+  let entry = canonical(root, entry)
+    .map_err(|source| EvalError::Resolve { source: Box::new(source), chain: Vec::new() })?;
+  let shown = Shown::new(root, &entry);
+  let code = read_and_strip(root, &entry)?;
   let observed = ObservedEnvironment::new(environment.clone());
 
   let slot: ErrorSlot = Rc::new(RefCell::new(None));
-  let runtime = Runtime::new().map_err(|error| runtime_error(&error))?;
+  let imports: Imports = Rc::new(RefCell::new(Vec::new()));
+  let runtime = Runtime::new().map_err(|error| runtime_error(&error, &shown))?;
   runtime.set_loader(
-    PathResolver { slot: Rc::clone(&slot) },
-    StrippingLoader { slot: Rc::clone(&slot) },
+    PathResolver { slot: Rc::clone(&slot), imports: Rc::clone(&imports), entry: shown.clone() },
+    StrippingLoader { slot: Rc::clone(&slot), entry: shown.clone() },
   );
 
   // A config that imports itself in a cycle would otherwise recurse until the stack
   // runs out. QuickJS unwinds a memory limit as a normal exception instead.
   runtime.set_max_stack_size(STACK_LIMIT);
 
-  let ceilings = Ceilings::new(Limits::from_environment(environment), &entry);
+  let ceilings = Ceilings::new(Limits::from_environment(environment), shown.clone());
   runtime.set_memory_limit(ceilings.limits.memory_bytes());
   runtime.set_interrupt_handler(Some(ceilings.watch()));
 
-  let context = Context::full(&runtime).map_err(|error| runtime_error(&error))?;
+  let context = Context::full(&runtime).map_err(|error| runtime_error(&error, &shown))?;
   let key = entry.to_string_lossy().into_owned();
 
   let outcome = context.with(|ctx| {
-    install(&ctx, &observed).map_err(|error| runtime_error(&error))?;
+    install(&ctx, &observed).map_err(|error| runtime_error(&error, &shown))?;
 
-    let value = match evaluate_entry(&ctx, &key, code, &entry, &ceilings) {
-      Ok(value) => to_json(&value, &entry)?,
+    let value = match evaluate_entry(&ctx, &key, code, &shown, &ceilings, &imports) {
+      Ok(value) => to_json(&value, &shown)?,
       // A ceiling is why this evaluation ended, whatever it was doing at the time.
       Err(caught) if caught.is_ceiling() => return Err(caught),
       // The slot holds the real error whenever a loader or resolver rejected the
@@ -197,7 +302,7 @@ pub fn evaluate_config(entry: &Path, environment: &Environment) -> Result<Evalua
     };
 
     if !value.is_object() {
-      return Err(missing_default_export(&entry));
+      return Err(missing_default_export(&shown));
     }
 
     Ok(Evaluated { value, observed: observed.observations() })
@@ -221,17 +326,12 @@ struct Ceilings {
   /// until the other half can be read.
   refused: Cell<bool>,
   /// Where to point when a stack cannot say which file the engine was in.
-  entry: PathBuf,
+  entry: Shown,
 }
 
 impl Ceilings {
-  fn new(limits: Limits, entry: &Path) -> Self {
-    Self {
-      limits,
-      overran: Rc::new(Cell::new(false)),
-      refused: Cell::new(false),
-      entry: entry.to_owned(),
-    }
+  fn new(limits: Limits, entry: Shown) -> Self {
+    Self { limits, overran: Rc::new(Cell::new(false)), refused: Cell::new(false), entry }
   }
 
   /// The handler QuickJS calls while it runs. Once it has stopped the engine it keeps
@@ -280,7 +380,7 @@ impl Ceilings {
   /// A loop inside an imported helper is that helper's, and the stack is the only place
   /// that says so. Frames naming rune's own bootstrap or the module rune supplies point at
   /// nothing a user can open, so the answer is the first frame that is a file on disk.
-  fn evaluating(&self, error: &CaughtError<'_>) -> PathBuf {
+  fn evaluating(&self, error: &CaughtError<'_>) -> Shown {
     let CaughtError::Exception(exception) = error else {
       return self.entry.clone();
     };
@@ -288,7 +388,7 @@ impl Ceilings {
     exception
       .stack()
       .and_then(|stack| stack.lines().find_map(readable_file))
-      .unwrap_or_else(|| self.entry.clone())
+      .map_or_else(|| self.entry.clone(), |path| self.entry.sibling(&path))
   }
 }
 
@@ -326,10 +426,11 @@ fn evaluate_entry<'js>(
   ctx: &Ctx<'js>,
   key: &str,
   code: String,
-  entry: &Path,
+  entry: &Shown,
   ceilings: &Ceilings,
+  imports: &Imports,
 ) -> Result<Value<'js>, EvalError> {
-  let caught = |error: &CaughtError<'_>| caught_error(error, ceilings);
+  let caught = |error: &CaughtError<'_>| caught_error(error, ceilings, imports);
 
   let declared = Module::declare(ctx.clone(), key, code).catch(ctx).map_err(|e| caught(&e))?;
   let (module, promise) = declared.eval().catch(ctx).map_err(|e| caught(&e))?;
@@ -341,9 +442,9 @@ fn evaluate_entry<'js>(
 }
 
 /// The most common authoring mistake, and the one an engine-level error explains worst.
-fn missing_default_export(entry: &Path) -> EvalError {
+fn missing_default_export(entry: &Shown) -> EvalError {
   EvalError::Shape {
-    path: entry.to_owned(),
+    path: entry.clone(),
     message: "a rune config must default-export an object\n\n\
               for example:\n\n  \
               export default {\n    \
@@ -355,15 +456,98 @@ fn missing_default_export(entry: &Path) -> EvalError {
   }
 }
 
-fn caught_error(error: &CaughtError<'_>, ceilings: &Ceilings) -> EvalError {
-  ceilings.reached(error).unwrap_or_else(|| {
-    // The engine reports positions in generated JavaScript. The user wrote TypeScript.
-    EvalError::Runtime { message: crate::trace::remap(&error.to_string()) }
+fn caught_error(error: &CaughtError<'_>, ceilings: &Ceilings, imports: &Imports) -> EvalError {
+  if let Some(reached) = ceilings.reached(error) {
+    return reached;
+  }
+  if let Some(unexported) = missing_export(error, imports, &ceilings.entry) {
+    return unexported;
+  }
+
+  let path = ceilings.evaluating(error);
+  let (message, stack) = engine_words(error);
+
+  // The engine reports positions in generated JavaScript. The user wrote TypeScript.
+  EvalError::Runtime { message, trace: crate::trace::remap(&stack, path.root()), path }
+}
+
+/// What the engine said, split from where it says it happened.
+fn engine_words(error: &CaughtError<'_>) -> (String, String) {
+  match error {
+    CaughtError::Exception(exception) => (
+      exception.message().unwrap_or_else(|| "the engine gave no reason".to_owned()),
+      exception.stack().unwrap_or_default(),
+    ),
+    // The one engine failure with no sentence worth passing on: it is written about the
+    // engine's own scheduling, and rune already knows what it means for a config.
+    CaughtError::Error(rquickjs::Error::WouldBlock) => (NEVER_SETTLES.to_owned(), String::new()),
+    CaughtError::Error(error) => (error.to_string(), String::new()),
+    CaughtError::Value(value) => (format!("{value:?} was thrown"), String::new()),
+  }
+}
+
+/// A config awaiting something nothing will ever resolve.
+///
+/// `await` works and is meant to; what does not work is waiting for a promise that is not
+/// already on its way to settling, because there is nothing left to run that could settle
+/// it.
+const NEVER_SETTLES: &str = "it is waiting for a promise that nothing will settle\n\n\
+   rune evaluates a config to completion before any script starts, and no work is \
+   scheduled for later, so a promise waiting on a timer, on input or on another process \
+   never resolves.";
+
+/// An import of a name the module it names does not provide.
+///
+/// The engine answers this one with an exception carrying no stack at all, so nothing in
+/// what it says names the file that wrote the import. Its two names are read out of it and
+/// the file is found in rune's own record of what resolved from where; none of the
+/// engine's words are printed. A phrasing this does not recognise falls through to the
+/// wrap, which still names the file being evaluated.
+fn missing_export(error: &CaughtError<'_>, imports: &Imports, entry: &Shown) -> Option<EvalError> {
+  let CaughtError::Exception(exception) = error else {
+    return None;
+  };
+  if exception.stack().is_some_and(|stack| !stack.trim().is_empty()) {
+    return None;
+  }
+
+  let (name, module) = read_missing_export(&exception.message()?)?;
+  let edges = imports.borrow();
+  let candidates: Vec<&Edge> = edges.iter().filter(|edge| edge.key == module).collect();
+
+  // With one importer there is nothing to choose between. With several, the file that
+  // asked for this name is the one to name, and the file itself is what says so.
+  let edge = match candidates.as_slice() {
+    [] => return None,
+    [only] => only,
+    several => several.iter().find(|edge| asked_for(edge, &name)).or(several.first())?,
+  };
+
+  Some(EvalError::MissingExport {
+    importer: entry.sibling(&edge.importer),
+    specifier: edge.specifier.clone(),
+    name,
+    chain: chain_to(&edges, &edge.importer.to_string_lossy(), entry),
   })
 }
 
-fn runtime_error(error: &rquickjs::Error) -> EvalError {
-  EvalError::Runtime { message: error.to_string() }
+fn read_missing_export(message: &str) -> Option<(String, String)> {
+  let rest = message.strip_prefix("Could not find export '")?;
+  let (name, module) = rest.split_once("' in module '")?;
+
+  Some((name.to_owned(), module.strip_suffix('\'')?.to_owned()))
+}
+
+fn asked_for(edge: &Edge, name: &str) -> bool {
+  let Ok(source) = std::fs::read_to_string(&edge.importer) else {
+    return false;
+  };
+
+  specifiers_importing(&source, name).contains(&edge.specifier)
+}
+
+fn runtime_error(error: &rquickjs::Error, path: &Shown) -> EvalError {
+  EvalError::Runtime { path: path.clone(), message: error.to_string(), trace: String::new() }
 }
 
 /// Converts an evaluated JavaScript value into JSON.
@@ -371,7 +555,7 @@ fn runtime_error(error: &rquickjs::Error) -> EvalError {
 /// This is the boundary where a config stops being a program and becomes data. Anything
 /// with no JSON meaning — a function, a symbol — is rejected by name rather than dropped,
 /// because silently losing a field is the worst way to tell a user their config is wrong.
-fn to_json(value: &Value<'_>, path: &Path) -> Result<serde_json::Value, EvalError> {
+fn to_json(value: &Value<'_>, path: &Shown) -> Result<serde_json::Value, EvalError> {
   if value.is_undefined() || value.is_null() {
     return Ok(serde_json::Value::Null);
   }
@@ -383,28 +567,28 @@ fn to_json(value: &Value<'_>, path: &Path) -> Result<serde_json::Value, EvalErro
   if let Some(number) = value.as_number() {
     return serde_json::Number::from_f64(number).map(serde_json::Value::Number).ok_or_else(|| {
       EvalError::Shape {
-        path: path.to_owned(),
+        path: path.clone(),
         message: format!("`{number}` has no JSON representation"),
       }
     });
   }
 
   if let Some(string) = value.as_string() {
-    let string = string.to_string().map_err(|error| runtime_error(&error))?;
+    let string = string.to_string().map_err(|error| runtime_error(&error, path))?;
     return Ok(serde_json::Value::String(string));
   }
 
   if let Some(array) = value.as_array() {
     let mut items = Vec::with_capacity(array.len());
     for item in array.iter::<Value<'_>>() {
-      items.push(to_json(&item.map_err(|error| runtime_error(&error))?, path)?);
+      items.push(to_json(&item.map_err(|error| runtime_error(&error, path))?, path)?);
     }
     return Ok(serde_json::Value::Array(items));
   }
 
   if value.is_function() {
     return Err(EvalError::Shape {
-      path: path.to_owned(),
+      path: path.clone(),
       message: "a config may not contain functions; it must be plain data".to_owned(),
     });
   }
@@ -412,14 +596,144 @@ fn to_json(value: &Value<'_>, path: &Path) -> Result<serde_json::Value, EvalErro
   if let Some(object) = value.as_object() {
     let mut map = serde_json::Map::new();
     for entry in object.props::<String, Value<'_>>() {
-      let (key, item) = entry.map_err(|error| runtime_error(&error))?;
+      let (key, item) = entry.map_err(|error| runtime_error(&error, path))?;
       map.insert(key, to_json(&item, path)?);
     }
     return Ok(serde_json::Value::Object(map));
   }
 
   Err(EvalError::Shape {
-    path: path.to_owned(),
+    path: path.clone(),
     message: format!("value of type `{}` has no JSON representation", value.type_of().as_str()),
   })
+}
+
+#[cfg(test)]
+mod tests {
+  use std::io::{Error as IoError, ErrorKind};
+  use std::path::Path;
+  use std::time::Duration;
+
+  use super::EvalError;
+  use crate::paths::Shown;
+  use crate::resolve::ResolveError;
+  use crate::strip::{Position, StripError};
+
+  const ROOT: &str = if cfg!(windows) { r"C:\repo" } else { "/repo" };
+
+  fn shown(name: &str) -> Shown {
+    let root = Path::new(ROOT);
+    Shown::new(root, &root.join(name))
+  }
+
+  /// Every way a specifier can fail to become a file.
+  ///
+  /// The match is the checker: a variant added later leaves it non-exhaustive and this
+  /// crate stops compiling until the new kind has a sample here.
+  fn every_resolve_failure() -> Vec<ResolveError> {
+    let failures = vec![
+      ResolveError::NotRelative {
+        specifier: "lodash".to_owned(),
+        importer: shown("rune.config.ts"),
+      },
+      ResolveError::NotFound {
+        specifier: "./nope".to_owned(),
+        importer: shown("rune.config.ts"),
+        tried: vec![shown("nope.ts")],
+      },
+      ResolveError::Unreadable {
+        path: shown("rune.config.ts"),
+        source: IoError::new(ErrorKind::PermissionDenied, "denied"),
+      },
+    ];
+
+    for failure in &failures {
+      match failure {
+        ResolveError::NotRelative { .. }
+        | ResolveError::NotFound { .. }
+        | ResolveError::Unreadable { .. } => {}
+      }
+    }
+
+    failures
+  }
+
+  /// Every way loading a config can fail, checked the same way.
+  fn every_failure() -> Vec<EvalError> {
+    let mut failures: Vec<EvalError> = every_resolve_failure()
+      .into_iter()
+      .map(|source| EvalError::Resolve { source: Box::new(source), chain: Vec::new() })
+      .collect();
+
+    failures.extend([
+      EvalError::Unreadable {
+        path: shown("rune.config.ts"),
+        source: IoError::new(ErrorKind::PermissionDenied, "denied"),
+      },
+      EvalError::Strip {
+        path: shown("rune.config.ts"),
+        errors: vec![StripError {
+          message: "Unexpected token".to_owned(),
+          position: Some(Position { line: 3, column: 24, text: "const x = {;".to_owned() }),
+        }],
+      },
+      EvalError::MissingExport {
+        importer: shown("rune.config.ts"),
+        specifier: crate::builtin::MODULE.to_owned(),
+        name: "nope".to_owned(),
+        chain: Vec::new(),
+      },
+      EvalError::Runtime {
+        path: shown("rune.config.ts"),
+        message: "cannot read property 'f' of undefined".to_owned(),
+        trace: String::new(),
+      },
+      EvalError::TimeLimit { path: shown("rune.config.ts"), limit: Duration::from_millis(250) },
+      EvalError::MemoryLimit { path: shown("rune.config.ts"), limit_mb: 256 },
+      EvalError::Shape { path: shown("rune.config.ts"), message: "not an object".to_owned() },
+    ]);
+
+    for failure in &failures {
+      match failure {
+        EvalError::Resolve { .. }
+        | EvalError::Unreadable { .. }
+        | EvalError::Strip { .. }
+        | EvalError::MissingExport { .. }
+        | EvalError::Runtime { .. }
+        | EvalError::TimeLimit { .. }
+        | EvalError::MemoryLimit { .. }
+        | EvalError::Shape { .. } => {}
+      }
+    }
+
+    failures
+  }
+
+  /// Test R23.11 — the rule, over the type rather than over a list of messages somebody
+  /// remembered to keep up to date.
+  ///
+  /// The first line naming a file is what a foreign sentence cannot do: the parser, the
+  /// engine and the standard library all describe what went wrong and none of them knows
+  /// which file the user has to open. A message that leads with one of their sentences is
+  /// that layer talking to the user directly.
+  #[test]
+  fn every_failure_leads_with_the_file_it_is_about() {
+    for failure in every_failure() {
+      let message = failure.to_string();
+      let first = message.lines().next().unwrap_or_default();
+
+      assert!(first.contains("rune.config.ts"), "the first line names no file:\n{message}");
+    }
+  }
+
+  /// The repository the file sits in is the reader's own working directory, and printing
+  /// it back to them costs most of a terminal line.
+  #[test]
+  fn no_failure_prints_the_path_to_the_repository() {
+    for failure in every_failure() {
+      let message = failure.to_string();
+
+      assert!(!message.contains(ROOT), "an absolute path survived:\n{message}");
+    }
+  }
 }

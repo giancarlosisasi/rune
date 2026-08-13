@@ -1,0 +1,10 @@
+---
+source: crates/rune-config/tests/config_errors.rs
+description: an export the supplied module does not have
+expression: failure(&dir)
+---
+scripts/helpers.ts imports `nope` from `@gio-labs/rune`, which does not export it
+
+imports followed to get here:
+  rune.config.ts
+  scripts/helpers.ts

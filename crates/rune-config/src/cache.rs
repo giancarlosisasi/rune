@@ -41,12 +41,16 @@ struct Entry {
 }
 
 pub struct Cache {
+  root: PathBuf,
   directory: PathBuf,
 }
 
 impl Cache {
   pub fn for_root(root: &Path) -> Self {
-    Self { directory: CACHE_PATH.iter().fold(root.to_path_buf(), |path, part| path.join(part)) }
+    Self {
+      root: root.to_path_buf(),
+      directory: CACHE_PATH.iter().fold(root.to_path_buf(), |path, part| path.join(part)),
+    }
   }
 
   pub fn directory(&self) -> &Path {
@@ -68,7 +72,7 @@ pub fn lookup(
   entries: &[PathBuf],
   environment: &Environment,
 ) -> Option<Vec<serde_json::Value>> {
-  let key = key_for(entries)?;
+  let key = key_for(&cache.root, entries)?;
   let stored = std::fs::read_to_string(cache.entry_path(&key)).ok()?;
   let stored: Entry = serde_json::from_str(&stored).ok()?;
 
@@ -87,7 +91,7 @@ pub fn lookup(
 
 /// Best-effort write. A failure here costs a re-evaluation next time and nothing else.
 pub fn store(cache: &Cache, entries: &[PathBuf], evaluated: &[Evaluated]) {
-  let Some(key) = key_for(entries) else {
+  let Some(key) = key_for(&cache.root, entries) else {
     return;
   };
   if std::fs::create_dir_all(&cache.directory).is_err() {
@@ -128,13 +132,13 @@ pub fn clear(root: &Path) -> std::io::Result<()> {
 /// Every config's import closure goes into the one key. A key covering only the root
 /// config would serve a stale result the moment a package config changed, which is the
 /// worst failure a cache can produce: correct-looking output from the wrong definition.
-fn key_for(entries: &[PathBuf]) -> Option<String> {
+fn key_for(root: &Path, entries: &[PathBuf]) -> Option<String> {
   let mut hasher = blake3::Hasher::new();
   hasher.update(env!("CARGO_PKG_VERSION").as_bytes());
   hasher.update(PLATFORM.as_bytes());
 
   for entry in entries {
-    for file in import_closure(entry)? {
+    for file in import_closure(root, entry)? {
       let bytes = std::fs::read(&file).ok()?;
       // The path is hashed too: moving a helper changes what the config means, even when
       // its bytes do not.
@@ -151,7 +155,7 @@ fn key_for(entries: &[PathBuf]) -> Option<String> {
 /// Resolution goes through [`crate::resolve::resolve`] — the same function the module
 /// loader uses. Two resolvers could disagree, and then this hash would describe a file
 /// set that is not the one that ran.
-fn import_closure(entry: &Path) -> Option<BTreeSet<PathBuf>> {
+fn import_closure(root: &Path, entry: &Path) -> Option<BTreeSet<PathBuf>> {
   let mut found = BTreeSet::new();
   let mut queue = vec![entry.to_path_buf()];
 
@@ -163,7 +167,7 @@ fn import_closure(entry: &Path) -> Option<BTreeSet<PathBuf>> {
     let source = std::fs::read_to_string(&file).ok()?;
     let stripped = strip_types(&source, &file).ok()?;
     for specifier in &stripped.imports {
-      queue.push(resolve(&file, specifier).ok()?);
+      queue.push(resolve(root, &file, specifier).ok()?);
     }
   }
 

@@ -2,9 +2,8 @@
 source: crates/rune-config/tests/rune_object.rs
 expression: "refusal(\"(globalThis as any).rune = {};\\nexport default {};\\n\")"
 ---
-Error: `rune` is read-only.
+rune.config.ts failed while it was being evaluated as a rune config
+
+`rune` is read-only.
 
 `rune` describes the machine this config is being evaluated on. Changing it would change what the config resolves with and not what is true.
-    at readOnly (eval_script)
-    at set (eval_script)
-    at <anonymous> ([TMP]/rune.config.ts:2:1)

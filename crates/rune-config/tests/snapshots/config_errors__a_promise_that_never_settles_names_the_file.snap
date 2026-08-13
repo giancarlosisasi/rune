@@ -1,0 +1,10 @@
+---
+source: crates/rune-config/tests/config_errors.rs
+description: awaiting a promise that never settles
+expression: failure(&dir)
+---
+rune.config.ts failed while it was being evaluated as a rune config
+
+it is waiting for a promise that nothing will settle
+
+rune evaluates a config to completion before any script starts, and no work is scheduled for later, so a promise waiting on a timer, on input or on another process never resolves.

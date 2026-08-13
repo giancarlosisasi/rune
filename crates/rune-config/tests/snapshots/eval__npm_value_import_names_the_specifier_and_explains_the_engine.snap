@@ -3,7 +3,7 @@ source: crates/rune-config/tests/eval.rs
 description: npm value import
 expression: "redact(dir.path(), &error)"
 ---
-cannot import `lodash` from [TMP]/rune.config.ts
+cannot import `lodash` from rune.config.ts
 
 rune evaluates this config with an embedded JavaScript engine, so npm packages and Node built-in modules do not exist at runtime.
 

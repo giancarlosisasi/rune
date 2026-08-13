@@ -1,0 +1,8 @@
+---
+source: crates/rune-config/tests/config_errors.rs
+description: an error the engine raised
+expression: failure(&dir)
+---
+rune.config.ts failed while it was being evaluated as a rune config
+
+cannot read property 'f' of undefined

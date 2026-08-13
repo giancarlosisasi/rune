@@ -10,6 +10,13 @@ use rquickjs::function::Func;
 
 use crate::env::{ObservedEnvironment, PLATFORM};
 
+/// The name the engine gives the bootstrap below, and therefore the name that appears in
+/// every frame from it.
+///
+/// Nothing a user wrote is in that file and nothing they can open is either, so a trace
+/// carrying one of these frames is showing them rune's insides.
+pub const BOOTSTRAP_NAME: &str = "eval_script";
+
 /// Builds the environment object and installs the refusals. Runs once per context, before
 /// any module loads, so that `__rune` is waiting when the supplied module evaluates.
 pub fn install(ctx: &Ctx<'_>, env: &ObservedEnvironment) -> rquickjs::Result<()> {

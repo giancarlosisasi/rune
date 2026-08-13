@@ -3,7 +3,7 @@ source: crates/rune-cli/tests/limits.rs
 description: a config allocating without end
 expression: "redact(test.dir(), &stderr_of(&output))"
 ---
-[TMP]/rune.config.ts asked for more memory than a config may use while it is evaluated: the limit is 32 MB
+rune.config.ts asked for more memory than a config may use while it is evaluated: the limit is 32 MB
 
 rune stops here itself so that the operating system does not stop it instead, which ends the process with nothing on screen.
 
