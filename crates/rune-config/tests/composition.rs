@@ -29,6 +29,38 @@ fn rejection(scripts: &str) -> String {
   redact(dir.path(), &error)
 }
 
+/// `levels` scripts, each naming the next, with one command at the bottom.
+///
+/// The two group kinds alternate because a nest of one kind would leave the other
+/// untested, and both recurse through the same walk.
+fn nest(levels: usize) -> String {
+  let groups = (0..levels - 1).map(|level| {
+    let kind = if level % 2 == 0 { "parallel" } else { "serial" };
+    format!("  n{level}: {{ {kind}: ['n{}'] }},", level + 1)
+  });
+  let bottom = format!("  n{}: {{ command: 'echo leaf' }},", levels - 1);
+
+  format!("{{\n{}\n}}", groups.chain([bottom]).collect::<Vec<_>>().join("\n"))
+}
+
+/// Test R18.1 — the refusal names the script, the depth reached and the limit.
+///
+/// The ceiling used to be the thread's stack, so the same config loaded on one platform
+/// and killed the process on another, and what reached the user was a runtime's line with
+/// a thread id in it.
+#[test]
+fn a_nest_deeper_than_rune_runs_is_refused_with_the_depth_and_the_limit() {
+  let error = rejection(&nest(65));
+
+  assert!(error.contains("`n0`"), "the message must name the script asked for: {error}");
+  assert!(error.contains("65"), "the message must state the depth reached: {error}");
+  assert!(error.contains("64"), "the message must state the limit: {error}");
+
+  insta::with_settings!({ description => "a nest one level deeper than rune runs" }, {
+    insta::assert_snapshot!(error);
+  });
+}
+
 /// Test 5a.5 — two groups that name each other.
 ///
 /// Found when the config loads, not when the group runs, and rendered as the path rather

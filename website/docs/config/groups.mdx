@@ -202,6 +202,18 @@ reaches them, and an inner failure propagates outward under the same rules.
 There are no dependency edges between the members of one group. Nesting is the mechanism for
 expressing structure.
 
+Nesting stops at 64 levels. A name that reaches further is refused when the config loads, naming the
+script, the depth and the limit:
+
+```
+`n0` nests scripts deeper than rune goes: 65 levels, and the limit is 64.
+
+  n0 → n1 → n2 → … 59 more … → n62 → n63 → n64
+```
+
+The limit is Rune's own rather than the machine's, so a config that loads on one operating system
+loads on all of them. Nothing written by hand comes near it; a generator can.
+
 ## Member names are checked at load time
 
 Every name in `serial`, `parallel` and `dependsOn` is resolved when the config loads, not when the

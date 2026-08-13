@@ -554,6 +554,81 @@ fn a_shared_prerequisite_runs_once_per_dependent() {
   }
 }
 
+/// `levels` scripts, each naming the next, with one command at the bottom and one more
+/// beside the nest that nothing in it reaches.
+///
+/// The kinds rotate, so a nest is never one group kind's problem alone. A test that has to
+/// *run* the nest asks for `serial` only: a parallel group labels its members, and nesting
+/// the labels would bury the bytes that run exists to prove arrived.
+fn nest(levels: usize, kinds: &[&str]) -> String {
+  let groups = (0..levels - 1)
+    .map(|level| format!(r#"n{level}: {{ {}: ["n{}"] }}"#, kinds[level % kinds.len()], level + 1));
+  let bottom = format!(r#"n{}: {{ command: "echo leaf" }}"#, levels - 1);
+  let unrelated = r#"unrelated: { command: "echo unrelated" }"#.to_owned();
+
+  config(&format!("{{ {} }}", groups.chain([bottom, unrelated]).collect::<Vec<_>>().join(", ")))
+}
+
+/// Test R18.2 — the binary is still alive to explain itself.
+///
+/// This depth used to end the process outright: `STATUS_STACK_OVERFLOW` on Windows and a
+/// segfault on Linux, with one line from the runtime and a thread id in it. The exit code
+/// is half the assertion — a crash has no message to compare.
+#[test]
+fn a_nest_deeper_than_rune_runs_is_refused_instead_of_crashing() {
+  Test::new()
+    .config(&nest(290, &["parallel", "serial"]))
+    .args(["run", "n0"])
+    .stdout("")
+    .stderr_regex(concat!(
+      r"(?s)^`n0` nests scripts deeper than rune goes: 65 levels, and the limit is 64\.\n\n",
+      r"  n0 → n1 → n2 → … 59 more … → n62 → n63 → n64\n\n"
+    ))
+    .status(1)
+    .run();
+}
+
+/// Test R18.3 — one answer, whatever was asked.
+///
+/// Every name a config defines is planned when the config loads, so a nest nobody named
+/// still refuses. `unrelated` is the half that reads as a widening: it is a plain command
+/// with no path into the nest, and today it crashes the process along with everything else.
+#[test]
+fn an_over_deep_nest_answers_the_same_to_every_command() {
+  let test = Test::new()
+    .config(&nest(290, &["parallel", "serial"]))
+    .args(["run", "unrelated"])
+    .stdout("")
+    .stderr_regex(r"^`n0` nests scripts deeper than rune goes")
+    .status(1);
+
+  let unrelated = test.run();
+  let listed = test.then_run(&["list"]);
+  let inspected = test.then_run(&["inspect", "n5"]);
+
+  for (command, output) in [("list", &listed), ("inspect n5", &inspected)] {
+    assert_eq!(output.status.code(), Some(1), "`{command}` must refuse too");
+    assert_eq!(stderr(output), stderr(&unrelated), "`{command}` must give the same refusal");
+    assert!(output.stdout.is_empty(), "`{command}` must write nothing to stdout");
+  }
+}
+
+/// Test R18.4 — the row this change is most likely to break.
+///
+/// Fifty levels is far past anything anyone writes and still inside the limit, so it has
+/// to run exactly as it did: the innermost command's bytes, and nothing of rune's own on
+/// the stream they travel.
+#[test]
+fn a_nest_the_limit_allows_still_runs_to_the_bottom() {
+  Test::new()
+    .config(&nest(50, &["serial"]))
+    .args(["run", "n0"])
+    .stdout("leaf\n")
+    .stderr_regex(r"(?s)^→ n0: n1\n")
+    .status(0)
+    .run();
+}
+
 /// `inspect` explains a group without running it. The command exists so that a name whose
 /// meaning is not obvious can be explained, and a group is the least obvious name yet.
 #[test]

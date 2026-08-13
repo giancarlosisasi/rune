@@ -1,0 +1,10 @@
+---
+source: crates/rune-config/tests/composition.rs
+description: a nest one level deeper than rune runs
+expression: error
+---
+`n0` nests scripts deeper than rune goes: 65 levels, and the limit is 64.
+
+  n0 → n1 → n2 → … 59 more … → n62 → n63 → n64
+
+the limit is rune's own, so a config that loads on one operating system loads on all of them.

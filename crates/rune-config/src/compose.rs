@@ -40,7 +40,28 @@ pub enum ComposeError {
      a script cannot be part of what has to finish before it starts."
   )]
   Cycle { path: String },
+
+  #[error(
+    "`{script}` nests scripts deeper than rune goes: {depth} levels, and the limit is {}.\
+     \n\n  {chain}\n\n\
+     the limit is rune's own, so a config that loads on one operating system loads on all \
+     of them.",
+    DEPTH_LIMIT
+  )]
+  TooDeep { script: String, depth: usize, chain: String },
 }
+
+/// How many levels of groups and prerequisites one name may reach through.
+///
+/// Far above anything written by hand — a real config nests two or three — and far below
+/// the smallest stack any platform gives the walk, which broke between 280 and 290 levels
+/// on Windows against a release build. That gap is the margin a debug build's larger
+/// frames need.
+///
+/// It is fixed rather than configurable. A number a user can raise is a number they raise
+/// instead of repairing the config, and the generators that reach these depths would raise
+/// it too.
+const DEPTH_LIMIT: usize = 64;
 
 /// A run, flattened from however many groups and prerequisites produced it.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -238,6 +259,14 @@ fn step(
     return Err(ComposeError::Cycle { path: render(path, reference) });
   }
 
+  if path.len() >= DEPTH_LIMIT {
+    return Err(ComposeError::TooDeep {
+      script: path.first().map_or(script, String::as_str).to_owned(),
+      depth: path.len() + 1,
+      chain: elide(path, reference),
+    });
+  }
+
   let Some(resolved) = inherit::resolve(layers, reference, scope)? else {
     return Err(edge.unknown(layers, scope, script, reference));
   };
@@ -247,13 +276,18 @@ fn step(
   Ok(Step { name: reference.to_owned(), role: edge.role(), plan })
 }
 
-/// The walk so far, then the name it came back to: `a → b → a`.
+/// The circle, from the first repeated name onward: `a → b → a`.
 ///
 /// The path is the debugging information. "cycle detected" leaves the user rebuilding
 /// their own config graph by hand to find out which scripts were involved.
+///
+/// The walk that led into the circle is dropped. Every link shown has to be one the reader
+/// can cut, and a link outside the circle is not: cutting it leaves the circle turning.
 fn render(path: &[String], repeated: &str) -> String {
+  let circle = path.iter().position(|seen| seen == repeated).unwrap_or(0);
+
   let mut rendered = String::new();
-  for name in path {
+  for name in &path[circle..] {
     rendered.push_str(name);
     rendered.push_str(" → ");
   }
@@ -262,11 +296,31 @@ fn render(path: &[String], repeated: &str) -> String {
   rendered
 }
 
+/// The chain that reached the limit, with its middle replaced by a count.
+///
+/// Printing all 65 levels would make the message the thing it is reporting. The ends are
+/// what a reader acts on: the script they asked for, and where the nesting bottomed out.
+fn elide(path: &[String], last: &str) -> String {
+  const ENDS: usize = 3;
+
+  let names: Vec<&str> = path.iter().map(String::as_str).chain([last]).collect();
+  if names.len() <= ENDS * 2 + 1 {
+    return names.join(" → ");
+  }
+
+  format!(
+    "{} → … {} more … → {}",
+    names[..ENDS].join(" → "),
+    names.len() - ENDS * 2,
+    names[names.len() - ENDS..].join(" → ")
+  )
+}
+
 #[cfg(test)]
 mod tests {
   use std::path::PathBuf;
 
-  use super::{ComposeError, Plan, Role, Step, plan, validate};
+  use super::{ComposeError, DEPTH_LIMIT, Plan, Role, Step, plan, validate};
   use crate::inherit::{Layer, Scope};
   use crate::schema::parse;
 
@@ -482,6 +536,88 @@ mod tests {
 
     let ComposeError::Cycle { path } = error else { panic!("expected a circle, got {error}") };
     assert_eq!(path, "ci → build → ci");
+  }
+
+  /// Test R18.5 — the circle alone, not the walk that found it.
+  ///
+  /// `check` merely lists `lint`; it is where the walk started and it is not in the circle.
+  /// Showing it first sent the reader to the one link that cutting cannot help.
+  #[test]
+  fn a_circle_reached_from_a_group_outside_it_renders_the_circle_alone() {
+    let error = plan(
+      &layers(
+        r#"{
+          "check": { "parallel": ["lint"] },
+          "lint": { "command": "eslint .", "dependsOn": ["format"] },
+          "format": { "command": "prettier -w .", "dependsOn": ["lint"] }
+        }"#,
+      ),
+      "check",
+      Scope::Nearest,
+    )
+    .unwrap_err();
+
+    let ComposeError::Cycle { path } = error else { panic!("expected a circle, got {error}") };
+    assert_eq!(path, "lint → format → lint");
+  }
+
+  /// Test R18.6 — a script that waits for itself is a circle of one.
+  #[test]
+  fn a_script_depending_on_itself_renders_that_one_name_repeated() {
+    let error = plan(
+      &layers(
+        r#"{
+          "check": { "serial": ["lint"] },
+          "lint": { "command": "eslint .", "dependsOn": ["lint"] }
+        }"#,
+      ),
+      "check",
+      Scope::Nearest,
+    )
+    .unwrap_err();
+
+    let ComposeError::Cycle { path } = error else { panic!("expected a circle, got {error}") };
+    assert_eq!(path, "lint → lint");
+  }
+
+  /// `levels` scripts, each naming the next, with one command at the bottom.
+  fn nest(levels: usize) -> String {
+    let groups = (0..levels - 1).map(|level| {
+      let kind = if level % 2 == 0 { "parallel" } else { "serial" };
+      format!(r#""n{level}": {{ "{kind}": ["n{}"] }}"#, level + 1)
+    });
+    let bottom = format!(r#""n{}": {{ "command": "echo leaf" }}"#, levels - 1);
+
+    format!("{{ {} }}", groups.chain([bottom]).collect::<Vec<_>>().join(", "))
+  }
+
+  /// Test R18.1's unit half — the walk stops itself, one level past the limit.
+  #[test]
+  fn a_nest_deeper_than_the_limit_is_refused_where_the_walk_reaches_it() {
+    let error = plan(&layers(&nest(DEPTH_LIMIT + 1)), "n0", Scope::Nearest).unwrap_err();
+
+    let ComposeError::TooDeep { script, depth, .. } = error else {
+      panic!("expected a refusal, got {error}")
+    };
+    assert_eq!(script, "n0");
+    assert_eq!(depth, DEPTH_LIMIT + 1);
+  }
+
+  /// A nest the limit allows is untouched — the row this change is most likely to break.
+  #[test]
+  fn a_nest_the_limit_allows_still_plans() {
+    assert!(plan(&layers(&nest(DEPTH_LIMIT)), "n0", Scope::Nearest).is_ok());
+  }
+
+  /// Test R18.8 — the ends and a count, never all 65 names.
+  #[test]
+  fn the_refusal_elides_the_middle_of_a_long_chain() {
+    let error = plan(&layers(&nest(DEPTH_LIMIT + 1)), "n0", Scope::Nearest).unwrap_err();
+
+    let ComposeError::TooDeep { chain, .. } = error else {
+      panic!("expected a refusal, got {error}")
+    };
+    assert_eq!(chain, "n0 → n1 → n2 → … 59 more … → n62 → n63 → n64");
   }
 
   /// Test 5a.6's unit half — the group, the member, and the likeliest correction.
