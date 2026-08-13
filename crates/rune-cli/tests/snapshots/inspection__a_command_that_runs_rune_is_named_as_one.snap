@@ -1,0 +1,13 @@
+---
+source: crates/rune-cli/tests/inspection.rs
+description: a command that runs rune on another script
+expression: reported(&nested)
+---
+release
+
+command      rune run build
+runs rune    starts rune again
+directory    .
+
+resolved through
+  rune.config.ts  release  runs `rune run build`

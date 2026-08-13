@@ -3,6 +3,8 @@
 //! A bare `ReferenceError: fs is not defined` is technically correct and useless. The
 //! user's real question is "then what *can* I use?", so every refused name answers it.
 
+use std::collections::BTreeMap;
+
 use rquickjs::Ctx;
 use rquickjs::function::Func;
 
@@ -21,8 +23,102 @@ pub fn install(ctx: &Ctx<'_>, env: &ObservedEnvironment) -> rquickjs::Result<()>
   globals.set("__runeEnvNames", Func::from(move || lister.names()))?;
   globals.set("__runeIsCI", Func::from(move || ci_reader.is_ci()))?;
   globals.set("__runePlatform", PLATFORM)?;
+  globals.set("__runeUnavailable", refusals())?;
 
   ctx.eval::<(), _>(BOOTSTRAP)
+}
+
+/// Every name a config can reach for and will not find.
+///
+/// Published so that the rule — no name here reaches a user as the engine's own `is not
+/// defined` — can be asserted over the set the product installs rather than over a copy
+/// of it kept in a test.
+pub fn unavailable_names() -> impl Iterator<Item = &'static str> {
+  UNAVAILABLE.iter().map(|entry| entry.name)
+}
+
+/// A name the config environment does not offer, and why.
+struct Unavailable {
+  name: &'static str,
+  answer: Answer,
+}
+
+/// What a refusal says after it has named the name.
+///
+/// Most names need only the one explanation. The two a user types on purpose need the
+/// answer to the question that made them type it, which "this is not Node" is not.
+#[derive(Clone, Copy)]
+enum Answer {
+  NotNode,
+  Printing,
+  Deferring,
+}
+
+/// One table: adding a name and deciding whether it deserves words of its own are the
+/// same edit.
+///
+/// The first group is Node's; the second is what a user reaches for while debugging a
+/// config that produced the wrong string.
+const UNAVAILABLE: &[Unavailable] = &[
+  Unavailable { name: "require", answer: Answer::NotNode },
+  Unavailable { name: "process", answer: Answer::NotNode },
+  Unavailable { name: "module", answer: Answer::NotNode },
+  Unavailable { name: "exports", answer: Answer::NotNode },
+  Unavailable { name: "Buffer", answer: Answer::NotNode },
+  Unavailable { name: "global", answer: Answer::NotNode },
+  Unavailable { name: "__dirname", answer: Answer::NotNode },
+  Unavailable { name: "__filename", answer: Answer::NotNode },
+  Unavailable { name: "fs", answer: Answer::NotNode },
+  Unavailable { name: "path", answer: Answer::NotNode },
+  Unavailable { name: "os", answer: Answer::NotNode },
+  Unavailable { name: "url", answer: Answer::NotNode },
+  Unavailable { name: "util", answer: Answer::NotNode },
+  Unavailable { name: "child_process", answer: Answer::NotNode },
+  Unavailable { name: "crypto", answer: Answer::NotNode },
+  Unavailable { name: "console", answer: Answer::Printing },
+  Unavailable { name: "alert", answer: Answer::NotNode },
+  Unavailable { name: "fetch", answer: Answer::NotNode },
+  Unavailable { name: "setTimeout", answer: Answer::Deferring },
+  Unavailable { name: "setInterval", answer: Answer::Deferring },
+  Unavailable { name: "queueMicrotask", answer: Answer::Deferring },
+];
+
+/// What a config may use, which is what somebody who just found a name missing wants next.
+const AVAILABLE: &str = "\
+  \n  - `import { rune } from \"@gio-labs/rune\"` — then `rune.env`, `rune.platform`, `rune.isCI`\
+  \n  - relative imports of other files in this repository, such as `./scripts/helpers.ts`\
+  \n  - `import { defineConfig } from \"@gio-labs/rune\"` — the one package rune supplies itself\
+  \n  - `import type` from any npm package — type-only imports are erased before evaluation";
+
+/// The command that answers what a print or a log was reaching for.
+const INSPECT: &str = "to see what a script resolved to, run:\n  rune inspect <name>";
+
+/// Each refused name against the sentence it throws, for the bootstrap to install.
+fn refusals() -> BTreeMap<&'static str, String> {
+  UNAVAILABLE.iter().map(|entry| (entry.name, refusal(entry.name, entry.answer))).collect()
+}
+
+fn refusal(name: &str, answer: Answer) -> String {
+  let body = match answer {
+    Answer::NotNode => format!(
+      "rune evaluates this file with an embedded JavaScript engine, not Node.js, so Node \
+       globals and modules do not exist here.\n\nwhat does work:{AVAILABLE}"
+    ),
+    Answer::Printing => format!(
+      "rune evaluates this file to produce a result, not to run it, so there is nothing to \
+       print to.\n\n{INSPECT}"
+    ),
+    // Not "this is not Node": the engine defines `queueMicrotask`, and rune is the one
+    // taking it away. A message blaming the engine for that would state something rune
+    // has not established.
+    Answer::Deferring => format!(
+      "rune evaluates this file to produce a result, not to run it. Work scheduled for later \
+       would happen while a result is being computed and not when the same result comes from \
+       the cache, so nothing here defers.\n\n{INSPECT}"
+    ),
+  };
+
+  format!("`{name}` is not available in a rune config.\n\n{body}")
 }
 
 /// `env` is a proxy rather than a plain object so that reads can be recorded: the cache
@@ -107,31 +203,14 @@ const BOOTSTRAP: &str = r#"
     set() { throw readOnly("rune"); },
   });
 
-  const AVAILABLE = [
-    "  - `import { rune } from \"@gio-labs/rune\"` — then `rune.env`, `rune.platform`, `rune.isCI`",
-    "  - relative imports of other files in this repository, such as `./scripts/helpers.ts`",
-    "  - `import { defineConfig } from \"@gio-labs/rune\"` — the one package rune supplies itself",
-    "  - `import type` from any npm package — type-only imports are erased before evaluation",
-  ].join("\n");
-
-  const UNAVAILABLE = [
-    "require", "process", "module", "exports", "Buffer", "global",
-    "__dirname", "__filename",
-    "fs", "path", "os", "url", "util", "child_process", "crypto",
-  ];
-
-  for (const name of UNAVAILABLE) {
+  // The names and their sentences come from rune, so that adding a name and deciding
+  // what it says are one edit in one language. This loop is only the mechanism.
+  for (const name of Object.keys(__runeUnavailable)) {
+    const message = __runeUnavailable[name];
     try {
       Object.defineProperty(globalThis, name, {
         configurable: false,
-        get() {
-          throw new ReferenceError(
-            "`" + name + "` is not available in a rune config.\n\n" +
-            "rune evaluates this file with an embedded JavaScript engine, not Node.js, " +
-            "so Node globals and modules do not exist here.\n\n" +
-            "what does work:\n" + AVAILABLE
-          );
-        },
+        get() { throw new ReferenceError(message); },
       });
     } catch (_) {
       // A name the engine already defines as non-configurable stays as it is; there is
@@ -143,5 +222,6 @@ const BOOTSTRAP: &str = r#"
   delete globalThis.__runeEnvNames;
   delete globalThis.__runePlatform;
   delete globalThis.__runeIsCI;
+  delete globalThis.__runeUnavailable;
 })();
 "#;

@@ -114,6 +114,12 @@ pub struct Discovered {
   /// say about it", and a third opinion in the middle would need an order nobody can
   /// predict from the file they are reading.
   pub package_config: Option<PathBuf>,
+  /// The configs the walk went past between the nearest one and the root.
+  ///
+  /// They take no part in anything and exist to be named. A config here is never read —
+  /// not even parsed — so an illegal one and a working one are equally silent, and a user
+  /// who put a file where it looks right has nothing on screen to tell them otherwise.
+  pub unused: Vec<PathBuf>,
   /// The nearest package directory at or above the starting point. Scripts run here.
   pub package_dir: PathBuf,
 }
@@ -125,23 +131,24 @@ impl Discovered {
   }
 }
 
-/// The nearest `package.json` at or above `start`, within the repository boundary.
+/// The nearest `package.json` at or above `start`, or what ended the search.
 ///
-/// The same walk `discover` makes, so `rune init` seeds from the package the loader
-/// would later call this script's home.
-pub fn nearest_package_json(start: &Path) -> Option<PathBuf> {
+/// The same walk `discover` makes, so `rune init` seeds from the package the loader would
+/// later call this script's home. It fails in the same vocabulary too: a caller holding
+/// only "nothing found" has one sentence for two situations that need opposite advice.
+pub fn nearest_package_json(start: &Path) -> Result<PathBuf, StoppedAt> {
   for directory in start.ancestors() {
     let candidate = directory.join(PACKAGE_FILE);
     if candidate.is_file() {
-      return Some(candidate);
+      return Ok(candidate);
     }
 
     if directory.join(BOUNDARY).exists() {
-      break;
+      return Err(StoppedAt::Repository(directory.to_path_buf()));
     }
   }
 
-  None
+  Err(StoppedAt::FilesystemRoot)
 }
 
 /// The directories directly inside `directory`, sorted, minus the ones a descent skips.
@@ -229,6 +236,9 @@ pub fn discover(start: &Path) -> Result<Discovered, NotFound> {
   };
 
   let root = root_config.parent().unwrap_or(Path::new("")).to_path_buf();
+  // Nearest first, so everything between the first entry and the last is a third opinion
+  // in the middle. Taken before the list is disturbed below.
+  let unused = configs.get(1..configs.len().saturating_sub(1)).unwrap_or_default().to_vec();
   // `configs` holds at least the root config, so a second entry is a genuinely nearer one.
   let package_config = (configs.len() > 1).then(|| configs.swap_remove(0));
 
@@ -236,6 +246,7 @@ pub fn discover(start: &Path) -> Result<Discovered, NotFound> {
     root_config,
     root,
     package_config,
+    unused,
     package_dir: package_dir.unwrap_or(started_from),
   })
 }

@@ -1,0 +1,11 @@
+---
+source: crates/rune-cli/tests/arguments.rs
+description: a required argument that is missing
+expression: stderr(&missing)
+---
+error: the following required arguments were not provided:
+  <NAME>
+
+Usage: rune run <NAME> [ARGS]...
+
+For more information, try '--help'.

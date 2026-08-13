@@ -8,7 +8,7 @@ mod paths;
 
 use std::fs;
 
-use paths::redact;
+use paths::{redact, without_internal_positions};
 use rune_config::env::Environment;
 use rune_config::eval::evaluate_config;
 use tempfile::TempDir;
@@ -39,29 +39,6 @@ fn refusal(source: &str) -> String {
     .to_string();
 
   without_internal_positions(&redact(dir.path(), &error))
-}
-
-/// Frames from rune's own setup keep their shape and lose their position.
-///
-/// The sentence is what these snapshots exist for. Pinning the line numbers of a file no
-/// user can open would make every edit to it look like a change to the message.
-fn without_internal_positions(text: &str) -> String {
-  const FRAME: &str = "eval_script:";
-
-  let mut kept = String::with_capacity(text.len());
-  let mut rest = text;
-
-  while let Some(start) = rest.find(FRAME) {
-    kept.push_str(&rest[..start]);
-    kept.push_str("eval_script");
-
-    let position = &rest[start + FRAME.len()..];
-    let end = position.find(|c: char| !c.is_ascii_digit() && c != ':').unwrap_or(position.len());
-    rest = &position[end..];
-  }
-  kept.push_str(rest);
-
-  kept
 }
 
 /// Test R9.1 — the name a config spells has to find the variable the platform stores.

@@ -162,6 +162,15 @@ ecosystem does.
 | `rune init` | Write a starter config, optionally seeded from `package.json` |
 | `rune cache clear` | Remove every cached config result |
 
+### Which stream you get
+
+A command whose product is text writes that text to stdout: `rune list` and `rune inspect` both do,
+and both leave stderr for anything that goes wrong. Everything rune says about itself — warnings,
+diagnostics, failures — goes to stderr. `rune run` spawns a child and gives stdout to it.
+
+So `rune inspect build > resolved.txt` captures the report and nothing else, and a failed inspection
+writes to stderr and leaves the file empty rather than filling it with a complaint.
+
 ## Using rune with Turbo or Nx
 
 Rune is a script registry and a runner. It is not a task graph: no caching, no topological

@@ -15,6 +15,7 @@
 //! function that answers with a [`Completion`].
 
 pub mod bin_paths;
+pub mod depth;
 pub mod environment;
 mod group;
 mod lifecycle;
@@ -33,7 +34,7 @@ use thiserror::Error;
 
 use crate::environment::FileLayer;
 
-pub use crate::group::{Member, SuccessPolicy, Task};
+pub use crate::group::{Member, Role, Step, SuccessPolicy, Task};
 pub use crate::lifecycle::{Kill, KillSignal, Lifecycle, RetryDelay, TIMEOUT_CODE};
 
 /// A script, resolved down to everything spawning it needs.

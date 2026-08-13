@@ -137,11 +137,31 @@ pub enum Runs<'a> {
 }
 
 /// One step of a resolution: a definition, and what it contributed.
+///
+/// The whole declaration travels, not a summary of it. A level narrows a script one key
+/// at a time, and the merge decides every one of those keys as it goes — working out
+/// afterwards what a level contributed would be deciding it a second time, and two
+/// decisions can disagree.
 #[derive(Debug)]
 pub struct Link<'a> {
   pub name: &'a str,
   pub source: &'a Path,
-  pub append_args: &'a [String],
+  pub declared: &'a Script,
+}
+
+impl<'a> Link<'a> {
+  /// The arguments this level appends, which is nothing unless it extends another script.
+  pub fn append_args(&self) -> &'a [String] {
+    match &self.declared.kind {
+      Kind::Extends { append_args, .. } => append_args,
+      Kind::Command(_) | Kind::Serial { .. } | Kind::Parallel { .. } => &[],
+    }
+  }
+
+  /// Whether this level is the one that decides what the name actually runs.
+  pub fn defines_what_runs(&self) -> bool {
+    !matches!(self.declared.kind, Kind::Extends { .. })
+  }
 }
 
 /// Resolves `name` against `layers`, or reports why it cannot be.
@@ -307,7 +327,7 @@ fn merge<'a>(layers: &'a [Layer], walked: &[Step<'a>]) -> Resolved<'a> {
       env_files.push(Declared { value: declared, source: &layers[*layer].source });
     }
 
-    chain.push(Link { name, source: &layers[*layer].source, append_args: contributed });
+    chain.push(Link { name, source: &layers[*layer].source, declared: script });
   }
 
   // The walk reads base-outward; the files are consulted the other way round.

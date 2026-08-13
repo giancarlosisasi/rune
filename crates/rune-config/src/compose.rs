@@ -50,7 +50,10 @@ pub enum Plan {
   Command { script: String },
   /// Runs each step to completion, in order.
   Serial {
-    steps: Vec<Plan>,
+    /// The script this sequence belongs to: the group that names the members, or the
+    /// script that declared the prerequisites.
+    script: String,
+    steps: Vec<Step>,
     /// Runs every step even after one fails. The run still ends with the first failure's
     /// exit code.
     continue_on_error: bool,
@@ -63,6 +66,31 @@ pub enum Plan {
     continue_on_error: bool,
     policy: SuccessPolicy,
   },
+}
+
+/// One step of a sequence: the script it stands for, and why it is in the list.
+///
+/// Both travel with the plan because a run has to be able to talk about a step while it
+/// happens, and at that moment the code holding it has nothing else to call it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Step {
+  pub name: String,
+  pub role: Role,
+  pub plan: Plan,
+}
+
+/// How a step came to be in the sequence it is in.
+///
+/// It decides what is said about the step, so it is recorded rather than worked out
+/// later: a guess in a run's own book-keeping is how the wrong name gets printed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Role {
+  /// Named by the group that holds it.
+  Member,
+  /// Named by the script that has to wait for it.
+  Prerequisite,
+  /// The declaring script's own command, sequenced after its prerequisites.
+  Own,
 }
 
 /// One member of a parallel group.
@@ -101,7 +129,8 @@ pub fn validate(layers: &[Layer], scope: Scope) -> Result<(), ComposeError> {
   Ok(())
 }
 
-/// Which kind of reference a name was reached through. Only the wording differs.
+/// Which kind of reference a name was reached through. It decides the wording of the
+/// refusal when the name is not there, and the role of the step when it is.
 #[derive(Debug, Clone, Copy)]
 enum Edge {
   Member,
@@ -109,6 +138,13 @@ enum Edge {
 }
 
 impl Edge {
+  fn role(self) -> Role {
+    match self {
+      Self::Member => Role::Member,
+      Self::Prerequisite => Role::Prerequisite,
+    }
+  }
+
   fn unknown(self, layers: &[Layer], scope: Scope, script: &str, reference: &str) -> ComposeError {
     let suggestion = closest(reference, inherit::names(layers, scope)).map(str::to_owned);
 
@@ -163,8 +199,8 @@ fn assemble(
       // Prerequisites first, then the command they were declared for. Stopping at the
       // first failure is not negotiable here: the whole point of a prerequisite is that
       // what follows it is not worth running if it failed.
-      steps.push(own);
-      Ok(Plan::Serial { steps, continue_on_error: false })
+      steps.push(Step { name: name.to_owned(), role: Role::Own, plan: own });
+      Ok(Plan::Serial { script: name.to_owned(), steps, continue_on_error: false })
     }
     Runs::Serial { members, continue_on_error } => {
       // A group carries no prerequisites of its own — the schema refuses them, because a
@@ -173,14 +209,14 @@ fn assemble(
         steps.push(step(layers, scope, name, Edge::Member, member, path)?);
       }
 
-      Ok(Plan::Serial { steps, continue_on_error })
+      Ok(Plan::Serial { script: name.to_owned(), steps, continue_on_error })
     }
     Runs::Parallel { members, continue_on_error, policy } => {
       let members = members
         .iter()
         .map(|member| {
-          let plan = step(layers, scope, name, Edge::Member, member, path)?;
-          Ok(Member { name: member.clone(), plan })
+          let step = step(layers, scope, name, Edge::Member, member, path)?;
+          Ok(Member { name: step.name, plan: step.plan })
         })
         .collect::<Result<Vec<_>, ComposeError>>()?;
 
@@ -197,7 +233,7 @@ fn step(
   edge: Edge,
   reference: &str,
   path: &mut Vec<String>,
-) -> Result<Plan, ComposeError> {
+) -> Result<Step, ComposeError> {
   if path.iter().any(|seen| seen == reference) {
     return Err(ComposeError::Cycle { path: render(path, reference) });
   }
@@ -206,7 +242,9 @@ fn step(
     return Err(edge.unknown(layers, scope, script, reference));
   };
 
-  build(layers, scope, reference, &resolved, path)
+  let plan = build(layers, scope, reference, &resolved, path)?;
+
+  Ok(Step { name: reference.to_owned(), role: edge.role(), plan })
 }
 
 /// The walk so far, then the name it came back to: `a → b → a`.
@@ -228,7 +266,7 @@ fn render(path: &[String], repeated: &str) -> String {
 mod tests {
   use std::path::PathBuf;
 
-  use super::{ComposeError, Plan, plan, validate};
+  use super::{ComposeError, Plan, Role, Step, plan, validate};
   use crate::inherit::{Layer, Scope};
   use crate::schema::parse;
 
@@ -245,6 +283,18 @@ mod tests {
 
   fn command(name: &str) -> Plan {
     Plan::Command { script: name.to_owned() }
+  }
+
+  fn member(name: &str, plan: Plan) -> Step {
+    Step { name: name.to_owned(), role: Role::Member, plan }
+  }
+
+  fn prerequisite(name: &str) -> Step {
+    Step { name: name.to_owned(), role: Role::Prerequisite, plan: command(name) }
+  }
+
+  fn own(name: &str) -> Step {
+    Step { name: name.to_owned(), role: Role::Own, plan: command(name) }
   }
 
   /// A script with nothing to run first is one step, not a group of one. The distinction
@@ -268,7 +318,11 @@ mod tests {
 
     assert_eq!(
       plan,
-      Plan::Serial { steps: vec![command("clean"), command("build")], continue_on_error: false }
+      Plan::Serial {
+        script: "build".to_owned(),
+        steps: vec![prerequisite("clean"), own("build")],
+        continue_on_error: false,
+      }
     );
   }
 
@@ -290,9 +344,17 @@ mod tests {
     assert_eq!(
       plan,
       Plan::Serial {
+        script: "outer".to_owned(),
         steps: vec![
-          command("a"),
-          Plan::Serial { steps: vec![command("b"), command("c")], continue_on_error: true },
+          member("a", command("a")),
+          member(
+            "inner",
+            Plan::Serial {
+              script: "inner".to_owned(),
+              steps: vec![member("b", command("b")), member("c", command("c"))],
+              continue_on_error: true,
+            }
+          ),
         ],
         continue_on_error: false,
       }
@@ -316,15 +378,56 @@ mod tests {
     assert_eq!(
       plan,
       Plan::Serial {
+        script: "ci".to_owned(),
         steps: vec![
-          command("lint"),
-          Plan::Serial {
-            steps: vec![command("codegen"), command("test")],
-            continue_on_error: false,
-          },
+          member("lint", command("lint")),
+          member(
+            "test",
+            Plan::Serial {
+              script: "test".to_owned(),
+              steps: vec![prerequisite("codegen"), own("test")],
+              continue_on_error: false,
+            }
+          ),
         ],
         continue_on_error: false,
       }
+    );
+  }
+
+  /// Test R15.9 — the number a failure reports has to match the list the user can see.
+  ///
+  /// A member that brings prerequisites brings them as steps of its own sequence, so the
+  /// group being run is two steps long however much each member turns out to do.
+  #[test]
+  fn a_members_own_prerequisites_are_steps_of_its_own_sequence() {
+    let plan = planned(
+      r#"{
+        "one": { "command": "echo one" },
+        "before": { "command": "echo before" },
+        "also": { "command": "echo also" },
+        "two": { "command": "echo two", "dependsOn": ["before", "also"] },
+        "both": { "serial": ["one", "two"] }
+      }"#,
+      "both",
+    );
+
+    let Plan::Serial { script, steps, .. } = &plan else {
+      panic!("`both` did not plan as a group")
+    };
+    assert_eq!(script, "both");
+    assert_eq!(
+      steps.iter().map(|step| (step.name.as_str(), step.role)).collect::<Vec<_>>(),
+      vec![("one", Role::Member), ("two", Role::Member)]
+    );
+
+    let Plan::Serial { script, steps, .. } = &steps[1].plan else {
+      panic!("`two` did not plan its prerequisites")
+    };
+    assert_eq!(script, "two");
+    assert_eq!(
+      steps.iter().map(|step| (step.name.as_str(), step.role)).collect::<Vec<_>>(),
+      vec![("before", Role::Prerequisite), ("also", Role::Prerequisite), ("two", Role::Own)]
     );
   }
 

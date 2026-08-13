@@ -146,6 +146,37 @@ The suggestion appears when a defined name is within a Levenshtein distance of 2
 printed either way, because a suggestion alone hides the config from someone seeing it for the
 first time.
 
+Under `--root` the message names the scope it searched instead, because the list is the root's and
+not the one where you are standing. When the name would have resolved without the flag, it says so:
+
+```
+$ cd packages/legacy && rune run --root routes
+no script named `routes` at the repository root
+
+`--root` ignores packages/legacy/rune.config.ts, which does define `routes`.
+drop `--root` to run it.
+```
+
+## When an option belongs to another command
+
+`--root` works on `rune run` and `rune inspect`. Typed anywhere else it is refused by name, with
+what that command does accept and where the option does work:
+
+```
+$ rune init --root
+`--root` is not an option of `rune init`
+
+`rune init` accepts:
+  --from-package-json  Seed the starter with the scripts from that same package.json
+
+`--root` works on:
+  rune run
+  rune inspect
+```
+
+All of it is read off the command grammar, so a new option or a new command cannot arrive without
+this message covering it. The exit code is the usage-error code, on stderr, with stdout empty.
+
 ## When there is no config
 
 ```

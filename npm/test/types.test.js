@@ -124,3 +124,27 @@ function runeBinary() {
 
   return path.join(WORKSPACE, 'target', 'debug', name);
 }
+
+// Test R16.3 — the sentence a user meets first, because an editor shows it while they are
+// typing the field.
+//
+// Asserted per occurrence rather than once: `dependsOn` appears on two script shapes, and
+// documenting one of them leaves half the users reading nothing at all.
+test('R16.3 — every dependsOn the types publish says a shared prerequisite runs twice', () => {
+  const types = fs.readFileSync(path.join(__dirname, '..', 'rune', 'index.d.ts'), 'utf8');
+  const declarations = types.split('dependsOn?:').length - 1;
+
+  assert.ok(declarations >= 2, 'the field is expected on the command and the extends shapes');
+
+  // The comment block immediately above each declaration, which is the only text an
+  // editor will show for that field.
+  const documented = types
+    .split('dependsOn?:')
+    .slice(0, -1)
+    .map((before) => before.slice(before.lastIndexOf('/**')));
+
+  for (const comment of documented) {
+    assert.match(comment, /runs its own/i, `a dependsOn is undocumented or silent about repetition:\n${comment}`);
+    assert.match(comment, /does not deduplicate/i, `a dependsOn does not say rune keeps no task graph:\n${comment}`);
+  }
+});

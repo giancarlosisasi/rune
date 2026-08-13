@@ -14,6 +14,7 @@ Rune sets these after every other layer, so they are always the values below.
 | `RUNE_SCRIPT_NAME` | The name passed to `rune run` |
 | `RUNE_ROOT` | The directory holding the config that defined the script |
 | `RUNE_PACKAGE_DIR` | The package directory the run started from |
+| `RUNE_DEPTH` | How many times Rune has started Rune to reach this script. `1` for a script you ran yourself |
 
 A script uses them to find repository-relative paths without hard-coding `../..`:
 
@@ -63,6 +64,26 @@ warning: `RUNE_ROOT` from this script's `env` was ignored: `RUNE_` is reserved f
 
 The reason is that a script reading `RUNE_ROOT` has to be able to trust it. A config that could
 overwrite it would make the value mean something different per script.
+
+## How deep Rune may call itself
+
+A script's command may run Rune, and the Rune it runs may run it again. That call sits inside a
+shell command string, which Rune does not read, so nothing in a config declares it. Rune counts the
+levels in `RUNE_DEPTH` instead, and refuses past ten:
+
+```
+rune has started rune 10 times, which is as deep as it goes
+```
+
+Ten is fixed and cannot be raised. Levels are counted, never script names: two scripts that run each
+other repeat no name before the next level, and counting stops that shape as well as a script that
+runs itself.
+
+`rune inspect <name>` says whether a script's command starts Rune again, and whether the script it
+starts is the same one — before it is run.
+
+A tool between two levels that clears the environment breaks the chain and the count starts again.
+Nothing inside Rune can reach a process that discards what it was given.
 
 ## RUNE_BINARY_PATH
 

@@ -1,0 +1,25 @@
+---
+source: crates/rune-cli/tests/inspection.rs
+description: a serial group whose first member is a parallel group
+expression: reported(&output)
+---
+ci
+
+runs         check → build → test
+directory    .
+
+members
+  check        runs lint, typecheck, format at once
+               on failure   lets the others finish, then reports
+    lint       biome lint .
+    typecheck  tsc --noEmit
+    format     biome format .
+  build        tsc -b
+               runs first   clean:all
+               lifecycle    ends the whole tree after 600000 ms
+  test         vitest run
+               environment  NODE_ENV=test  this script's `env`
+                            TZ=UTC         this script's `env`
+
+resolved through
+  rune.config.ts  ci  runs check, build, test

@@ -1,0 +1,14 @@
+---
+source: crates/rune-cli/tests/inspection.rs
+description: the value comes from an env file
+expression: reported(&from_file)
+---
+start:api
+
+command      node server.mjs
+directory    .
+environment  LOG_LEVEL=info  `.env.shared`
+env files    `.env.shared`  1 assignment used, 0 ignored
+
+resolved through
+  rune.config.ts  start:api  runs `node server.mjs`, reads `.env.shared`

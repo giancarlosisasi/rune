@@ -1,0 +1,7 @@
+---
+source: crates/rune-cli/tests/env_files.rs
+description: "the count, attempted from both sources"
+expression: stderr_of(&output)
+---
+warning: `RUNE_DEPTH` on line 1 of `.env` was ignored: `RUNE_` is reserved for rune's own variables
+warning: `RUNE_DEPTH` from this script's `env` was ignored: `RUNE_` is reserved for rune's own variables

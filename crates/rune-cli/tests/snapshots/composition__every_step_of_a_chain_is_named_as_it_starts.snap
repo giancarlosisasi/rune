@@ -1,0 +1,7 @@
+---
+source: crates/rune-cli/tests/composition.rs
+expression: stderr(&output)
+---
+→ ci: lint
+→ ci: typecheck
+→ ci: test

@@ -19,15 +19,18 @@ test
 
 command      vitest run --reporter=dot --maxWorkers=1
 directory    packages/legacy
-environment  NODE_ENV=test
-ignored      `DATABASE_URL` from `.env.test` was ignored: the process environment already sets it
+environment  NODE_ENV=test                 this script's `env`
+             DATABASE_URL=postgres://ci    the process environment
+ignored      `DATABASE_URL` on line 4 of `.env.test` was ignored: the process environment already sets it
+env files    `.env.test`  3 assignments used, 1 ignored
 
 resolved through
-  rune.config.ts                  test  runs `vitest run --reporter=dot`
+  rune.config.ts                  test  runs `vitest run --reporter=dot`, sets NODE_ENV
   packages/legacy/rune.config.ts  test  appends `--maxWorkers=1`
 ```
 
-The report opens with the script name, then a labelled block, then the chain that produced it.
+The report opens with the script name, then a labelled block, then the members when the script has
+any, then the chain that produced it.
 
 ## The labelled block
 
@@ -38,6 +41,7 @@ made.
 | Label | Content |
 | --- | --- |
 | `command` | The final string, after inheritance, per-OS selection and argument quoting |
+| `runs rune` | Printed when the command starts Rune again, and says when the script it starts is this same one |
 | `runs` | A serial group's members, in order, joined by arrows |
 | `all at once` | A parallel group's members |
 | `succeeds if` | What the group's success policy means, said rather than named |
@@ -45,11 +49,41 @@ made.
 | `runs first` | The script's `dependsOn` chain |
 | `lifecycle` | One line per declared timeout, retry, kill signal and kill timeout |
 | `directory` | The working directory, relative to the config root |
-| `environment` | Every variable the config adds or changes |
+| `environment` | Every variable the config had something to say about, and what put it there |
 | `ignored` | Assignments that did not take effect, and why |
+| `env files` | Each file that took part, with how much of it was used |
 
 `environment` is the config's own delta. `PATH` and the `RUNE_` variables are not listed: Rune
 sets them for every script, so printing them would bury the one line that was a choice.
+
+Every value names its source, because the source is what decides the answer. A value from an
+`envFile` loses to the real environment and a value from a script's own `env` map beats it — the
+same variable at the same value, from opposite ends of the precedence rule. Where the environment
+won, the row shows the value the child will actually get, beside the assignment that lost.
+
+A value is escaped before it is printed, so one spanning lines stays on one row, and a value too
+long for the row is cut with its true length stated. The child still receives the exact bytes.
+
+### Commands that run Rune
+
+A command that runs Rune looks like any other command, and the only thing that separates a useful
+nested call from a script that calls itself without end is which name follows:
+
+```
+$ rune inspect loop
+loop
+
+command      rune run loop
+runs rune    starts rune again, on this same script
+             a script whose command runs itself calls itself without end
+directory    .
+
+resolved through
+  rune.config.ts  loop  runs `rune run loop`
+```
+
+Rune reads the leading word of the command and nothing else. A command that begins with an operator
+or a variable is left alone, and the report carries no such line.
 
 ## Chains
 
@@ -69,34 +103,62 @@ resolved through
   rune.config.ts  test:ci        appends `--reporter=junit`
 ```
 
+A step names what that level declared — the arguments it appended, the variables it set, the
+prerequisites and working directory it chose, the file it named, the lifecycle keys it wrote. A
+level that did not change the command does not claim to run it.
+
+### Configs that took no part
+
+Exactly two configs resolve a name: the nearest one and the root. A third in between is never
+read, not even parsed, so nothing else can tell you it is being ignored. `resolved through` names
+it:
+
+```
+$ cd apps/api && rune inspect lint
+lint
+
+command      biome lint .
+directory    apps/api
+
+resolved through
+  rune.config.ts       lint  runs `biome lint .`
+  apps/rune.config.ts        took no part — only the nearest config and the root are read
+```
+
 ## Groups
 
-A group has no command, so it reports its members and how they are run:
+A group is explained to the bottom in one invocation. Each member carries the command it resolves
+to, its kind when it is a group of its own, and whatever it declared about running:
 
 ```
 $ rune inspect ci
 ci
 
-runs         build → test → lint
+runs         check → build → test
 directory    .
 
+members
+  check        runs lint, typecheck, format at once
+               on failure   lets the others finish, then reports
+    lint       biome lint .
+    typecheck  tsc --noEmit
+    format     biome format .
+  build        tsc -b
+               runs first   clean:all
+               lifecycle    ends the whole tree after 600000 ms
+  test         vitest run
+               environment  NODE_ENV=test  this script's `env`
+
 resolved through
-  rune.config.ts  ci  runs build, test, lint
+  rune.config.ts  ci  runs check, build, test
 ```
 
-```
-$ rune inspect dev
-dev
+There is no depth limit and no flag: every level is rendered. A member appears once for every time
+it runs, because Rune orders scripts and does not deduplicate work.
 
-all at once  dev:api, dev:web
-succeeds if  the member that finishes first succeeds
-directory    .
-
-resolved through
-  rune.config.ts  dev  runs dev:api, dev:web at once
-```
-
-Inspect a member by name to see the command it resolves to.
+A member repeats nothing the group already said. Its directory is printed only when it differs
+from the script you asked about, and a parallel member states its success policy only when it is
+not the default.
 
 ## Lifecycle
 
@@ -120,7 +182,9 @@ the one line that was a decision.
 
 ## Flags
 
-`--root` inspects the root definition, ignoring anything a package narrowed.
+`--root` inspects the root definition, ignoring anything a package narrowed. A name that is missing
+under the flag says which scope was searched, and names the config that does define it when
+dropping the flag would find one.
 
 `rune inspect` takes no pass-through arguments. Use `rune run` for that.
 

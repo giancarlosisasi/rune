@@ -119,8 +119,32 @@ what does work:
 | --- | --- |
 | `require`, `process`, `module`, `exports`, `Buffer`, `global`, `__dirname`, `__filename` | Node globals |
 | `fs`, `path`, `os`, `url`, `util`, `child_process`, `crypto` | Node modules |
+| `console` | Nothing to print to, see below |
+| `setTimeout`, `setInterval`, `queueMicrotask` | Nothing here defers, see below |
+| `alert`, `fetch` | No host environment |
 | Runtime imports from npm packages | The specifier is named in the error |
 | Dynamic `import()` | Rejected, see below |
+
+No name a config reaches for reaches you as the engine's own `is not defined`. Every one of them is
+answered in Rune's words.
+
+### Printing, and work scheduled for later
+
+A config is evaluated to produce a result, not run. There is nothing to print to, and
+`rune inspect <name>` is what shows a resolved script:
+
+```
+Error: `console` is not available in a rune config.
+
+rune evaluates this file to produce a result, not to run it, so there is nothing to print to.
+
+to see what a script resolved to, run:
+  rune inspect <name>
+```
+
+`setTimeout`, `setInterval` and `queueMicrotask` are refused for the same reason. Work scheduled for
+later would happen while a result is being computed and not when the same result comes from the
+cache, so it would take effect about half the time and nothing would say which half.
 
 Type-only imports from npm packages are fine, because they are erased before anything runs:
 

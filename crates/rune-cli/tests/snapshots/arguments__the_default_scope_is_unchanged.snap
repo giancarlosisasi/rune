@@ -1,0 +1,13 @@
+---
+source: crates/rune-cli/tests/arguments.rs
+description: a misspelling at the default scope
+expression: stderr(&output)
+---
+no script named `biuld`
+
+did you mean `build`?
+
+scripts defined here:
+  build
+  routes
+  test

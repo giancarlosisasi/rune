@@ -1,0 +1,14 @@
+---
+source: crates/rune-cli/tests/inspection.rs
+description: a member with a prerequisite and a timeout
+expression: reported(&output)
+---
+build
+
+command      tsc -b
+runs first   clean:all
+lifecycle    ends the whole tree after 600000 ms
+directory    .
+
+resolved through
+  rune.config.ts  build  runs `tsc -b`, depends on clean:all, declares timeout

@@ -333,6 +333,99 @@ fn node_apis_fail_with_a_message_listing_what_is_available() {
   }
 }
 
+/// The message a config reading `name` as a bare global produces, with the machine and
+/// the position taken out of it.
+fn refusal_for(name: &str) -> String {
+  let dir = fixture(&[("rune.config.ts", &format!("export default {{ value: {name} }};\n"))]);
+
+  let error = evaluate_config(&dir.path().join("rune.config.ts"), &Environment::default())
+    .expect_err("the name must be refused")
+    .to_string();
+
+  paths::without_internal_positions(&redact(dir.path(), &error))
+}
+
+/// Test R12.1 — the first thing anyone types when a computed command comes out wrong.
+///
+/// A config is real code with templates and branches, so commands do come out wrong.
+/// `console is not defined` reads as the config being broken rather than as printing not
+/// being a thing here, and nothing in it offers a way to see the value that prompted it.
+#[test]
+fn printing_is_refused_with_its_own_answer() {
+  insta::with_settings!({ description => "a config reaching for console" }, {
+    insta::assert_snapshot!(refusal_for("console"));
+  });
+}
+
+/// Test R12.2 — the rule, over the whole set rather than over the names this test
+/// happens to remember.
+///
+/// Reading the set from the product is the point: a name that stops being covered, or a
+/// name the engine gains later, fails here rather than reaching a user.
+#[test]
+fn no_refused_global_is_left_in_the_engines_words() {
+  for name in rune_config::globals::unavailable_names() {
+    let message = refusal_for(name);
+
+    assert!(message.contains(name), "`{name}` is not named:\n{message}");
+    assert!(!message.contains("is not defined"), "`{name}` is left to the engine:\n{message}");
+  }
+}
+
+/// Test R12.3 — the names reached for in the same minute as `console`. A rule with known
+/// holes in it is not a rule.
+#[test]
+fn the_debugging_neighbours_are_refused_in_runes_words() {
+  for name in ["alert", "setTimeout", "setInterval", "queueMicrotask", "fetch"] {
+    let message = refusal_for(name);
+
+    assert!(
+      message.contains(&format!("`{name}` is not available in a rune config.")),
+      "`{name}` is not refused in rune's words:\n{message}"
+    );
+  }
+}
+
+/// Test R12.4 — one name gaining words of its own must not rewrite the others.
+#[test]
+fn the_names_already_covered_keep_the_shared_sentence() {
+  for name in ["require", "process", "Buffer", "__dirname", "__filename"] {
+    let message = refusal_for(name);
+
+    assert!(
+      message.contains(&format!(
+        "`{name}` is not available in a rune config.\n\n\
+         rune evaluates this file with an embedded JavaScript engine, not Node.js, so Node \
+         globals and modules do not exist here.\n\n\
+         what does work:\n  \
+         - `import {{ rune }} from \"@gio-labs/rune\"` — then `rune.env`, `rune.platform`, \
+         `rune.isCI`\n  \
+         - relative imports of other files in this repository, such as `./scripts/helpers.ts`\n  \
+         - `import {{ defineConfig }} from \"@gio-labs/rune\"` — the one package rune supplies \
+         itself\n  \
+         - `import type` from any npm package — type-only imports are erased before evaluation"
+      )),
+      "the shared sentence for `{name}` has moved:\n{message}"
+    );
+  }
+}
+
+/// Test R12.5 — only a bare read of the global throws. A config that declares the name
+/// itself is using its own binding, which is already true of `process`.
+#[test]
+fn a_config_declaring_its_own_console_is_unaffected() {
+  let dir = fixture(&[(
+    "rune.config.ts",
+    "const console = { log: (value: string) => value };\n\
+     export default { value: console.log('kept') };\n",
+  )]);
+
+  let evaluated = evaluate_config(&dir.path().join("rune.config.ts"), &Environment::default())
+    .expect("evaluates");
+
+  assert_eq!(evaluated.value["value"], "kept");
+}
+
 /// Test 2.1 — behavioral, not a snapshot: a snapshot of stripped enum output would
 /// freeze codegen formatting and churn on every oxc bump. This is the row that catches
 /// the semantic builder losing enum values.

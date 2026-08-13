@@ -1,0 +1,5 @@
+---
+source: crates/rune-cli/tests/composition.rs
+expression: stderr(&output)
+---
+build stopped: prerequisite `clean:all` exited 42

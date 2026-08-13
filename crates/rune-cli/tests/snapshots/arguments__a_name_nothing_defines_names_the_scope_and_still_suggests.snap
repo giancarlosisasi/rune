@@ -1,0 +1,12 @@
+---
+source: crates/rune-cli/tests/arguments.rs
+description: a misspelling asked for with --root
+expression: stderr(&output)
+---
+no script named `biuld` at the repository root
+
+did you mean `build`?
+
+scripts at the repository root:
+  build
+  test

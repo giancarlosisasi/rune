@@ -122,6 +122,25 @@ pub fn redact(dir: &Path, text: &str) -> String {
   redacted.replace('\\', "/")
 }
 
+/// Asserts that nothing above `dir` can answer or stop an upward walk.
+///
+/// A fixture without the boundary lets the walk leave the temporary directory, so what it
+/// finds up there is a fact about the machine. Stated rather than assumed: a machine that
+/// keeps a repository or a manifest at the top of a home directory fails here, with a
+/// message saying so, instead of failing obscurely later — or, for the seeding command,
+/// instead of writing a config beside a manifest that is not the test's.
+pub fn assert_nothing_above(dir: &Path) {
+  for ancestor in dir.ancestors().skip(1) {
+    for entry in [".git", "package.json"] {
+      assert!(
+        !ancestor.join(entry).exists(),
+        "this machine holds {entry} at {}, above the temporary directory",
+        ancestor.display()
+      );
+    }
+  }
+}
+
 /// Asserts that a path rune reported is the directory the test meant, whichever spelling
 /// each of them used.
 pub fn assert_same_path(reported: Option<&str>, expected: &Path, what: &str) {
@@ -202,6 +221,17 @@ impl Test {
     self.file("rune.config.ts", contents)
   }
 
+  /// Takes away the boundary every fixture is given, for the tests *about* a walk that
+  /// runs out of filesystem.
+  ///
+  /// The walk then leaves the temporary directory, so the caller owes
+  /// [`assert_nothing_above`] before the run.
+  pub fn without_boundary(self) -> Self {
+    let boundary = self.dir.path().join(".git");
+    std::fs::remove_dir_all(&boundary).expect("remove the fixture boundary");
+    self
+  }
+
   /// Puts a copy of the fixture binary at `relative`, as a fake tool named after whatever
   /// the fixture's command calls.
   pub fn tool(self, relative: &str) -> Self {
@@ -209,6 +239,21 @@ impl Test {
     let parent = path.parent().expect("a fixture path always has a parent");
     std::fs::create_dir_all(parent).expect("create fixture parent directories");
     std::fs::copy(testkit(), &path).expect("copy the fixture binary");
+    make_executable(&path);
+    self
+  }
+
+  /// Puts the binary under test in the fixture's own `node_modules/.bin`, so a script's
+  /// command can call `rune` by name and reach this build.
+  ///
+  /// The `.bin` chain rather than `PATH`: that chain is rune's own doing, so a script
+  /// written the way a real repository writes one is what gets exercised.
+  pub fn rune_as_a_tool(self) -> Self {
+    let name = format!("rune{}", std::env::consts::EXE_SUFFIX);
+    let path = self.dir.path().join("node_modules/.bin").join(name);
+    std::fs::create_dir_all(path.parent().expect("a fixture path always has a parent"))
+      .expect("create fixture parent directories");
+    std::fs::copy(binary(), &path).expect("copy the rune binary");
     make_executable(&path);
     self
   }

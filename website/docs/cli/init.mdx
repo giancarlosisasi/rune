@@ -118,6 +118,23 @@ is yours.
 Move the file to the repository root and delete the entries that belong to one package only. What
 remains is the shared set. [Adopting Rune in a monorepo](/guide/monorepo-adoption) covers the rest.
 
+When no `package.json` can be found, nothing is written and the message says which of the two ends
+the search reached, because they need different answers.
+
+```
+$ rune init --from-package-json
+no package.json found
+
+searched upward from /repo/packages/ui and stopped at /repo, the top of this repository.
+
+add a package.json to this repository, or write a config without seeding:
+
+  rune init
+```
+
+Reaching the filesystem root instead means you are not in a project at all, and the message says to
+change into one first. `rune init` on its own works in both cases.
+
 ## Exit codes
 
 | Situation | Code |

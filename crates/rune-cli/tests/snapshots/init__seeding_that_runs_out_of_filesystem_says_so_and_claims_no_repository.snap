@@ -1,0 +1,12 @@
+---
+source: crates/rune-cli/tests/init.rs
+description: seeding where no repository and no manifest sit above
+expression: "redact(test.dir(), &reported)"
+---
+no package.json found
+
+searched upward from [TMP] and reached the top of the filesystem without finding a project.
+
+change into your project and run this again, or write a config here without seeding:
+
+  rune init

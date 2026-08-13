@@ -1,14 +1,17 @@
 use std::ffi::OsString;
 use std::process::ExitCode;
 
+use clap::error::ErrorKind;
 use clap::{Arg, CommandFactory, FromArgMatches as _, Parser, Subcommand};
 use rune_config::inherit::Scope;
+use rune_exec::depth;
 
 mod init;
 mod inspect;
 mod list;
 mod run;
 mod script;
+mod usage;
 mod version;
 
 #[derive(Parser)]
@@ -84,10 +87,17 @@ fn main() -> ExitCode {
   // The version is handed to clap at startup rather than declared, because half of what
   // it reports — the binary that answered — is only knowable at run time.
   let command = Cli::command().version(version::report());
-  let cli = Cli::from_arg_matches(
-    &command.get_matches_from(with_the_boundary_marked(std::env::args_os().collect())),
-  )
-  .expect("the parsed arguments come from this grammar");
+  let raw = with_the_boundary_marked(std::env::args_os().collect());
+
+  let matches = match command.clone().try_get_matches_from(&raw) {
+    Ok(matches) => matches,
+    Err(error) => return refused(&command, &raw, &error),
+  };
+  let cli = Cli::from_arg_matches(&matches).expect("the parsed arguments come from this grammar");
+
+  if let Some(refusal) = too_deep(&cli.command) {
+    return fail(&refusal);
+  }
 
   match cli.command {
     // The child's exit code is the product of this subcommand, so it does not go through
@@ -105,6 +115,62 @@ fn main() -> ExitCode {
     Command::Cache { command: CacheCommand::Clear } => report(list::clear_cache()),
     Command::Inspect { name, root } => report(inspect::run(&name, scope(root))),
   }
+}
+
+/// The refusal, when rune has already started rune as deep as it goes.
+///
+/// Before the config is read, so a level of a runaway costs one process start rather than
+/// a process start and an evaluation, and so a runaway in a repository whose config is
+/// slow still ends promptly. Every subcommand and not only `run`: nothing legitimate comes
+/// near the limit, and a rule with a hole in it is a rule somebody finds the hole in.
+fn too_deep(command: &Command) -> Option<String> {
+  let reached = depth::of(std::env::var_os(depth::VARIABLE).as_deref());
+  if reached < depth::LIMIT {
+    return None;
+  }
+
+  let limit = depth::LIMIT;
+  let name = subject(command).unwrap_or("<script>");
+
+  Some(format!(
+    "rune has started rune {limit} times, which is as deep as it goes\n\n\
+     a script whose command runs rune starts another rune, which starts another.\n\
+     this run is {limit} levels down, so a script here runs itself without end.\n\n\
+     find the command that does it:\n\n  rune inspect {name}"
+  ))
+}
+
+/// The script an invocation is about, for the commands that are about one.
+fn subject(command: &Command) -> Option<&str> {
+  match command {
+    Command::Run { name, .. } | Command::Inspect { name, .. } => Some(name),
+    Command::List | Command::Init { .. } | Command::Cache { .. } => None,
+  }
+}
+
+/// What the parser refused, said in rune's words when it is an argument a command does
+/// not accept, and left to the parser for everything else.
+///
+/// The code is the parser's either way. A usage error stays a usage error: writing the
+/// message ourselves must not turn "you typed it wrong" into "it went wrong", because a
+/// script reads that code to tell the two apart.
+fn refused(command: &clap::Command, raw: &[OsString], error: &clap::Error) -> ExitCode {
+  let code = u8::try_from(error.exit_code()).unwrap_or(1);
+
+  let own = (error.kind() == ErrorKind::UnknownArgument)
+    .then(|| usage::unknown_argument(command, raw, error))
+    .flatten();
+
+  match own {
+    Some(message) => rune_out::diagnostic(&message),
+    // Help and version are products, not diagnostics, and clap already knows which of the
+    // two streams each of its own messages belongs on.
+    None => {
+      let _ = error.print();
+    }
+  }
+
+  ExitCode::from(code)
 }
 
 /// Writes the boundary between rune's options and the command's arguments into `raw`, as

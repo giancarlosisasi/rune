@@ -9,7 +9,7 @@ use std::fmt::Write as _;
 use std::io::Write as _;
 use std::path::Path;
 
-use rune_config::discover::{CONFIG_FILE, nearest_package_json};
+use rune_config::discover::{CONFIG_FILE, StoppedAt, nearest_package_json};
 
 use crate::script::working_directory;
 
@@ -111,15 +111,17 @@ struct Seed<'a> {
 /// write succeeded and nothing could use it.
 pub fn run(from_package_json: bool) -> Result<(), String> {
   let started_in = working_directory()?;
-  let manifest_path = nearest_package_json(&started_in);
+  // The anchor asks only whether a manifest was found. Why the search ended is the seeded
+  // form's business, and teaching the anchor to care would move where a config lands.
+  let found = nearest_package_json(&started_in);
   let directory =
-    manifest_path.as_deref().and_then(Path::parent).map_or(started_in.clone(), Path::to_path_buf);
+    found.as_deref().ok().and_then(Path::parent).map_or(started_in.clone(), Path::to_path_buf);
   let path = directory.join(CONFIG_FILE);
 
   // The manifest is read before anything is created, so a run that cannot find one
   // leaves the directory exactly as it was.
   let contents = if from_package_json {
-    let source = manifest_path.ok_or_else(|| missing_package_json(&started_in))?;
+    let source = found.map_err(|stopped_at| missing_package_json(&started_in, &stopped_at))?;
     let manifest = read_manifest(&source)?;
 
     render(SEEDED_INTRO, &seeded(&manifest, &source)?)
@@ -337,13 +339,38 @@ fn unwritable(path: &Path, error: &std::io::Error) -> String {
   format!("cannot write {}: {error}", path.display())
 }
 
-fn missing_package_json(started_from: &Path) -> String {
-  format!(
-    "no package.json found\n\n\
-     searched upward from {} and stopped at the repository boundary.\n\n\
-     run `rune init` on its own to write a starter config instead.",
-    started_from.display()
-  )
+/// Why seeding found nothing, and the step that matches that reason.
+///
+/// Stopping at the top of a repository and running out of filesystem are different
+/// situations: one means this project has no manifest above you, the other means you are
+/// not in a project at all. Scaffolding without seeding is offered either way, because it
+/// works either way.
+fn missing_package_json(started_from: &Path, stopped_at: &StoppedAt) -> String {
+  let started = started_from.display();
+
+  let (searched, step) = match stopped_at {
+    StoppedAt::Repository(repository) => {
+      let searched = if repository == started_from {
+        format!("searched {started}, the top of this repository.")
+      } else {
+        format!(
+          "searched upward from {started} and stopped at {}, the top of this repository.",
+          repository.display()
+        )
+      };
+
+      (searched, "add a package.json to this repository, or write a config without seeding:")
+    }
+    StoppedAt::FilesystemRoot => (
+      format!(
+        "searched upward from {started} and reached the top of the filesystem without finding \
+         a project."
+      ),
+      "change into your project and run this again, or write a config here without seeding:",
+    ),
+  };
+
+  format!("no package.json found\n\n{searched}\n\n{step}\n\n  rune init")
 }
 
 #[cfg(test)]

@@ -11,7 +11,7 @@
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
-use rune_config::compose::Plan;
+use rune_config::compose::{self, Plan};
 use rune_config::env::PLATFORM;
 use rune_config::envfile::Files;
 use rune_config::inherit::{Runs, Scope};
@@ -19,7 +19,7 @@ use rune_config::load::Loaded;
 use rune_config::paths::relative_to;
 use rune_config::schema::{self, SuccessPolicy};
 use rune_exec::environment::FileLayer;
-use rune_exec::{Completion, Directory, ExecRequest, Member, Task};
+use rune_exec::{Completion, Directory, ExecRequest, Member, Step, Task};
 
 use crate::script::{directory, env_files, load_here, unknown};
 
@@ -113,7 +113,7 @@ fn prepare<'a>(
     Plan::Command { script } => into.push(one(script, run, files)?),
     Plan::Serial { steps, .. } => {
       for step in steps {
-        prepare(step, run, files, into)?;
+        prepare(&step.plan, run, files, into)?;
       }
     }
     Plan::Parallel { members, .. } => {
@@ -140,8 +140,16 @@ fn compose<'a>(
       *next += 1;
       Task::Command(prepared.request(loaded))
     }
-    Plan::Serial { steps, continue_on_error } => Task::Serial {
-      steps: steps.iter().map(|step| compose(step, commands, loaded, next)).collect(),
+    Plan::Serial { script, steps, continue_on_error } => Task::Serial {
+      script: script.clone(),
+      steps: steps
+        .iter()
+        .map(|step| Step {
+          name: step.name.clone(),
+          role: role_of(step.role),
+          task: compose(&step.plan, commands, loaded, next),
+        })
+        .collect(),
       continue_on_error: *continue_on_error,
     },
     Plan::Parallel { members, continue_on_error, policy } => Task::Parallel {
@@ -155,6 +163,15 @@ fn compose<'a>(
       continue_on_error: *continue_on_error,
       policy: policy_of(*policy),
     },
+  }
+}
+
+/// The same three roles, spelled for the crate that acts on them.
+fn role_of(role: compose::Role) -> rune_exec::Role {
+  match role {
+    compose::Role::Member => rune_exec::Role::Member,
+    compose::Role::Prerequisite => rune_exec::Role::Prerequisite,
+    compose::Role::Own => rune_exec::Role::Own,
   }
 }
 

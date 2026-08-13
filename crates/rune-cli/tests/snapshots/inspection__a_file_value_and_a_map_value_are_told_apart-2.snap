@@ -1,0 +1,13 @@
+---
+source: crates/rune-cli/tests/inspection.rs
+description: "the value comes from the script's own env map"
+expression: reported(&from_map)
+---
+dev:api
+
+command      node server.mjs
+directory    .
+environment  LOG_LEVEL=info  this script's `env`
+
+resolved through
+  rune.config.ts  dev:api  runs `node server.mjs`, sets LOG_LEVEL

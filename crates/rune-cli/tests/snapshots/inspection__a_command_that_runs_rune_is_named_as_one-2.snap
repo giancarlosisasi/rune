@@ -1,0 +1,14 @@
+---
+source: crates/rune-cli/tests/inspection.rs
+description: a command that runs rune on this same script
+expression: reported(&itself)
+---
+loop
+
+command      rune run loop
+runs rune    starts rune again, on this same script
+             a script whose command runs itself calls itself without end
+directory    .
+
+resolved through
+  rune.config.ts  loop  runs `rune run loop`

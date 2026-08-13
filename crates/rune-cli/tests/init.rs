@@ -6,7 +6,9 @@
 
 mod harness;
 
-use harness::{Test, assert_same_path};
+use std::time::Instant;
+
+use harness::{Test, assert_nothing_above, assert_same_path, redact};
 
 const CONFIG_FILE: &str = "rune.config.ts";
 
@@ -75,6 +77,31 @@ const SELF_NAMING: [&str; 16] = [
 
 fn stdout_of(output: &std::process::Output) -> String {
   String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n")
+}
+
+fn stderr_of(output: &std::process::Output) -> String {
+  String::from_utf8_lossy(&output.stderr).replace("\r\n", "\n")
+}
+
+/// Seeding with nothing to seed from, inside a repository that holds no manifest.
+fn seeding_inside_a_repository() -> Test {
+  Test::new()
+    .args(["init", "--from-package-json"])
+    .stdout("")
+    .stderr_regex(r"(?s)no package\.json found")
+    .status(1)
+}
+
+/// The same command where the search runs out of filesystem instead.
+///
+/// The walk leaves the temporary directory here, so what sits above it is asserted before
+/// anything runs: a manifest up there would be seeded from, and the config would land
+/// beside it.
+fn seeding_outside_any_repository() -> Test {
+  let test = seeding_inside_a_repository().without_boundary();
+  assert_nothing_above(test.dir());
+
+  test
 }
 
 /// The path `init` reported writing, read off its own diagnostic.
@@ -295,14 +322,17 @@ fn seeding_turns_every_npm_script_into_a_command_script() {
   }
 }
 
-/// Test 4d.4 — the flag with nothing to seed from. The message names where it looked,
-/// like the discovery error it is modelled on, and nothing is left behind.
+/// Tests 4d.4 and R17.5 — the flag with nothing to seed from. The message names where it
+/// looked, like the discovery error it is modelled on, and nothing is left behind.
+///
+/// Everything this message already does right is asserted apart from its reason, so
+/// rewriting the reason cannot quietly lose the directory, the stream or the exit code.
 #[test]
 fn seeding_without_a_package_json_names_the_directory_it_searched() {
   let test = Test::new()
     .args(["init", "--from-package-json"])
     .stdout("")
-    .stderr_regex(r"(?s)no package\.json found.*searched upward from")
+    .stderr_regex(r"(?s)no package\.json found.*searched ")
     .status(1);
 
   let output = test.run();
@@ -314,6 +344,105 @@ fn seeding_without_a_package_json_names_the_directory_it_searched() {
 
   assert!(stderr.contains(leaf.as_ref()), "the message must name where it looked:\n{stderr}");
   assert!(!test.dir().join(CONFIG_FILE).exists(), "a failed seeding left a config behind");
+}
+
+/// Test R17.1 — the search really did stop at a repository, and the message names which
+/// one. The step that follows is the one that matches: this project has no manifest above
+/// you, so add one or scaffold without seeding.
+#[test]
+fn seeding_stopped_by_a_repository_names_it() {
+  let test = seeding_inside_a_repository();
+
+  let output = test.run_in("packages/ui");
+
+  insta::with_settings!({ description => "seeding from inside a repository that holds no manifest" }, {
+    insta::assert_snapshot!(redact(test.dir(), &stderr_of(&output)));
+  });
+}
+
+/// Test R17.2 — the same command where there is no repository at all. This is the sentence
+/// the evidence caught: it claimed a boundary it had not established, and the situation it
+/// answers wrongly is the more common one — you are not in a project.
+///
+/// Only meaningful beside R17.1. Both produced the same words, so either one alone passes
+/// against the defect.
+#[test]
+fn seeding_that_runs_out_of_filesystem_says_so_and_claims_no_repository() {
+  let test = seeding_outside_any_repository();
+
+  let output = test.run();
+  let reported = stderr_of(&output);
+
+  assert!(!reported.contains("repository"), "there is no repository anywhere here:\n{reported}");
+
+  insta::with_settings!({ description => "seeding where no repository and no manifest sit above" }, {
+    insta::assert_snapshot!(redact(test.dir(), &reported));
+  });
+}
+
+/// Test R17.3 — the manifest is read before anything is created, so both failures leave
+/// the tree exactly as it was. The two places a config could have landed are the anchor and
+/// the directory the command was run from.
+#[test]
+fn a_failed_seeding_writes_no_config_either_way() {
+  let inside = seeding_inside_a_repository();
+  inside.run_in("packages/ui");
+
+  let outside = seeding_outside_any_repository();
+  outside.run();
+
+  for (test, ran_in) in [(&inside, "packages/ui"), (&outside, "")] {
+    for candidate in [test.dir().to_path_buf(), test.dir().join(ran_in)] {
+      assert!(
+        !candidate.join(CONFIG_FILE).exists(),
+        "a failed seeding left a config at {}",
+        candidate.display()
+      );
+    }
+  }
+}
+
+/// Test R17.4 — the property this change is most likely to break. One walk decides where
+/// the config is written and why seeding failed, and only the second of those is being
+/// taught to care: the anchor reads whether a manifest was found and nothing else.
+///
+/// Asserted from both endings, because the walk now returns a different value for each.
+#[test]
+fn the_anchor_is_where_the_user_stands_whichever_way_the_search_ended() {
+  let scaffold = |test: Test| {
+    let test = test.args(["init"]).stdout("").stderr_regex(r"rune\.config\.ts").status(0);
+    test.run_in("src/deep");
+    test
+  };
+
+  let inside = scaffold(Test::new());
+  let outside = {
+    let test = Test::new().without_boundary();
+    assert_nothing_above(test.dir());
+    scaffold(test)
+  };
+
+  for test in [&inside, &outside] {
+    assert!(
+      test.dir().join("src/deep").join(CONFIG_FILE).is_file(),
+      "with no manifest above it, the config belongs where the command was run"
+    );
+    assert!(!test.dir().join(CONFIG_FILE).exists(), "nothing asked for a config at the root");
+  }
+}
+
+/// Test R17.7 — the walk ends at the top of the filesystem instead of looping there.
+///
+/// The budget is deliberately loose: this asserts termination, not speed, and a tight bound
+/// on a command that spawns a process would report a busy machine as a defect.
+#[test]
+fn seeding_with_no_repository_above_terminates() {
+  let test = seeding_outside_any_repository();
+
+  let started = Instant::now();
+  test.run();
+
+  assert!(started.elapsed().as_secs() < 30, "the command took {:?}", started.elapsed());
 }
 
 /// Tests R4.6 and R4.9 — the whole point of the seeder, measured against the manifest that

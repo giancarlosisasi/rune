@@ -1,0 +1,10 @@
+---
+source: crates/rune-cli/tests/arguments.rs
+description: a subcommand that does not exist
+expression: stderr(&unknown)
+---
+error: unrecognized subcommand 'nonsense'
+
+Usage: rune <COMMAND>
+
+For more information, try '--help'.

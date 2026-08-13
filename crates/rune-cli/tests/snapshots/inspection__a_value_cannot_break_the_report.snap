@@ -1,0 +1,15 @@
+---
+source: crates/rune-cli/tests/inspection.rs
+description: values the report has to survive
+expression: report
+---
+probe
+
+command      faketool.exe report-env
+directory    .
+environment  BIG=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx… (1048576 characters)  `.env`
+             LINES=one\ntwo                        `.env`
+env files    `.env`  2 assignments used, 0 ignored
+
+resolved through
+  rune.config.ts  probe  runs `faketool.exe report-env`, reads `.env`

@@ -12,7 +12,7 @@ use std::fs;
 use std::path::Path;
 use std::time::Instant;
 
-use rune_config::discover::{CONFIG_FILE, StoppedAt, discover};
+use rune_config::discover::{CONFIG_FILE, StoppedAt, discover, nearest_package_json};
 use tempfile::TempDir;
 
 /// A tree with the given directories and files, and no config anywhere.
@@ -99,6 +99,30 @@ fn a_config_below_the_starting_directory_is_named() {
   insta::with_settings!({ description => "no config above, and one in a subfolder" }, {
     insta::assert_snapshot!(redact(dir.path(), &error.to_string()));
   });
+}
+
+/// Test R17.6 — the manifest walk describes its failure in the same vocabulary the config
+/// walk does. Answering found-or-nothing is what left its caller with one sentence for two
+/// situations, and picking the wrong one whenever the walk ran out of filesystem.
+#[test]
+fn a_manifest_walk_stopped_by_a_repository_reports_that_repository() {
+  let dir = tree(&[".git/HEAD", "packages/ui/.keep"]);
+
+  let stopped = nearest_package_json(&dir.path().join("packages/ui"))
+    .expect_err("no package.json anywhere in this tree");
+
+  assert_eq!(stopped, StoppedAt::Repository(dir.path().to_path_buf()));
+}
+
+/// The other half of R17.6, and the half every existing caller depends on: what the walk
+/// answers when it succeeds is still the manifest itself.
+#[test]
+fn a_manifest_walk_that_finds_one_answers_with_it() {
+  let dir = tree(&[".git/HEAD", "package.json", "packages/ui/.keep"]);
+
+  let found = nearest_package_json(&dir.path().join("packages/ui"));
+
+  assert_eq!(found, Ok(dir.path().join("package.json")));
 }
 
 /// Test R8.6 — the walk ends at the top of the filesystem instead of looping there.

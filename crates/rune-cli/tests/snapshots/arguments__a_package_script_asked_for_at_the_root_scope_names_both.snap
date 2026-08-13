@@ -1,0 +1,9 @@
+---
+source: crates/rune-cli/tests/arguments.rs
+description: "a script only the package defines, asked for with --root"
+expression: stderr(&output)
+---
+no script named `routes` at the repository root
+
+`--root` ignores packages/legacy/rune.config.ts, which does define `routes`.
+drop `--root` to run it.

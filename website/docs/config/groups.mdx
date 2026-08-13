@@ -32,10 +32,28 @@ code once they have all finished.
 Because only one process runs at a time, a serial group behaves exactly like a single script: the
 child inherits the terminal, its output is not prefixed, and interactive tools work untouched.
 
+Rune names each member on stderr as it starts, so a step that passes without printing anything
+still leaves evidence that it ran.
+
 ```
 $ rune run ci
+→ ci: build
 compiled 14 packages in 3.2 s
+→ ci: test
 41 passed, 41 total
+→ ci: lint
+```
+
+When a member fails, Rune names the group, the member, its position in the sequence and its code.
+Stdout is untouched: every line Rune writes about the run goes to stderr.
+
+```
+$ rune run ci
+→ ci: build
+compiled 14 packages in 3.2 s
+→ ci: test
+41 failed, 2 passed
+ci failed at step 2 of 3: `test` exited 1
 ```
 
 ## dependsOn
@@ -51,6 +69,21 @@ test: {
 
 Dependencies run serially, in the order listed, before the script itself. A failing dependency
 stops the run with its own code.
+
+**Each dependent runs its own.** Two scripts naming the same prerequisite run it twice, and naming
+the same prerequisite twice in one list runs it twice. Rune does not deduplicate: it is a script
+registry and a runner, not a task graph, and deciding a prerequisite had already run would need the
+result cache and the ordering model Rune deliberately lives without. If you are arriving from Turbo
+or Nx, this is the boundary — put the shared step first in a serial group when it must run once, or
+let the task runner above Rune own it.
+
+A dependency that works says nothing — that is what it is for. A dependency that fails is named,
+because otherwise the run ends with an exit code from a script you never typed:
+
+```
+$ rune run test
+test stopped: prerequisite `build` exited 2
+```
 
 There is no `pre` and `post` naming convention. A script that should run first says so.
 

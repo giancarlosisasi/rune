@@ -1,0 +1,14 @@
+---
+source: crates/rune-config/tests/eval.rs
+assertion_line: 356
+description: a config reaching for console
+expression: "refusal_for(\"console\")"
+---
+Error: `console` is not available in a rune config.
+
+rune evaluates this file to produce a result, not to run it, so there is nothing to print to.
+
+to see what a script resolved to, run:
+  rune inspect <name>
+    at get (eval_script)
+    at <anonymous> ([TMP]/rune.config.ts:1:1)

@@ -30,8 +30,11 @@ export default defineConfig({
 
 ```
 $ rune run ci
+→ ci: build
 compiled 14 packages in 3.2 s
+→ ci: test
 41 failed, 2 passed
+ci failed at step 2 of 3: `test` exited 1
 $ echo $?
 1
 ```
@@ -39,6 +42,10 @@ $ echo $?
 Only one process runs at a time, so each member has the terminal to itself, its output is not
 prefixed, and interactive tools behave normally. `lint` never started, and the group exited with
 the code `test` produced.
+
+Rune names each step as it starts and names the one that failed, so a log read a week later can be
+attributed without opening the config. Those lines go to stderr; stdout carries only what the
+members wrote.
 
 ## A set that runs side by side
 
@@ -84,6 +91,10 @@ test: {
 ```
 
 There is no `pre` and `post` naming convention. A script that needs something first says so.
+
+Each dependent runs its own. If `test` and `build` both list `codegen`, running a group that holds
+both runs `codegen` twice — Rune does not deduplicate, because it is a runner and not a task graph.
+Where a shared step must run once, make it the first member of a serial group.
 
 ## Choosing between them
 

@@ -1,0 +1,13 @@
+---
+source: crates/rune-cli/tests/inspection.rs
+description: a config between the package and the root
+expression: reported(&passed_over)
+---
+lint
+
+command      biome lint .
+directory    apps/api
+
+resolved through
+  rune.config.ts       lint  runs `biome lint .`
+  apps/rune.config.ts        took no part — only the nearest config and the root are read

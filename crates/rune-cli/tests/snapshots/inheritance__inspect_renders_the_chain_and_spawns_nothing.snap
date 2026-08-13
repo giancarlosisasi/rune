@@ -7,8 +7,8 @@ test
 
 command      faketool.exe touch inspect-must-not-run.txt --maxWorkers=1
 directory    packages/legacy
-environment  NODE_ENV=test
+environment  NODE_ENV=test  this script's `env`
 
 resolved through
-  rune.config.ts                  test  runs `faketool.exe touch inspect-must-not-run.txt`
+  rune.config.ts                  test  runs `faketool.exe touch inspect-must-not-run.txt`, sets NODE_ENV
   packages/legacy/rune.config.ts  test  appends `--maxWorkers=1`

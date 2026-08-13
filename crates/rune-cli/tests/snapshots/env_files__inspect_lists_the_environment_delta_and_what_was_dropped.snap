@@ -7,11 +7,13 @@ probe
 
 command      vitest
 directory    .
-environment  API_URL=https://example.test
-             FOO=map
+environment  API_URL=https://example.test  `.env`
+             CI=true                       the process environment
+             FOO=map                       this script's `env`
 ignored      `CI` on line 2 of `.env` was ignored: the process environment already sets it
              `FOO` on line 3 of `.env` was ignored: this script's `env` already sets it
              `RUNE_ROOT` from this script's `env` was ignored: `RUNE_` is reserved for rune's own variables
+env files    `.env`  1 assignment used, 2 ignored
 
 resolved through
-  rune.config.ts  probe  runs `vitest`
+  rune.config.ts  probe  runs `vitest`, sets FOO, RUNE_ROOT, reads `.env`

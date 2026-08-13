@@ -115,6 +115,27 @@ fn the_rune_prefix_is_refused_from_a_file_and_from_an_env_map() {
   });
 }
 
+/// Test R19.5 — the count of how deep rune has started rune is refused from a config in
+/// exactly the way the other reserved names are.
+///
+/// It is the one reserved value a config would gain something by writing: a config that
+/// could reset the count could keep a runaway going for ever. The prefix already covers
+/// the name, and this is what says so rather than leaving it to be assumed.
+#[test]
+fn the_depth_cannot_be_reset_from_a_file_or_from_an_env_map() {
+  let output = fixture(r#"envFile: ".env", env: { RUNE_DEPTH: "0" }"#)
+    .file(".env", "RUNE_DEPTH=0\n")
+    .env("RUNE_DEPTH", "4")
+    .stderr_regex(r"(?s)^warning: .*\nwarning: ")
+    .run();
+
+  assert_eq!(env_of(&output)["RUNE_DEPTH"], "5", "rune's own count must survive");
+
+  insta::with_settings!({ description => "the count, attempted from both sources" }, {
+    insta::assert_snapshot!(stderr_of(&output));
+  });
+}
+
 /// A repository where one script names a file that is not there, which is what cloning a
 /// repository whose `.env` is in `.gitignore` gives you.
 fn with_a_missing_file() -> Test {

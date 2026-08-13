@@ -11,6 +11,7 @@ use rune_config::env::Environment;
 use rune_config::envfile::Files;
 use rune_config::inherit::{Declared, Resolved, Scope};
 use rune_config::load::{Loaded, load};
+use rune_config::paths::relative_to;
 use rune_config::resolve::lexically_normalize;
 use rune_config::suggest::closest;
 use rune_exec::environment::{Assignment, FileLayer};
@@ -84,13 +85,29 @@ pub fn directory(cwd: Option<Declared<'_>>, package_dir: &Path) -> PathBuf {
   lexically_normalize(&declared.anchor().join(path))
 }
 
-/// The miss, what is available, and the likeliest correction.
+/// The miss, the scope it was looked for in, what is available, and the likeliest
+/// correction.
 ///
-/// All three matter: the name alone leaves the user guessing, and a suggestion alone
-/// hides the rest of the config from someone who is new to it.
+/// All of it matters: the name alone leaves the user guessing, a suggestion alone hides
+/// the rest of the config from someone new to it, and a list introduced as "here" is a
+/// wrong answer under `--root` — `here` is true without the flag and false with it, so a
+/// user reads it as rune failing to find their config at all.
 pub fn unknown(name: &str, loaded: &Loaded, scope: Scope) -> String {
   let defined = loaded.names(scope);
-  let mut message = format!("no script named `{name}`");
+  let mut message = format!("no script named `{name}`{}", searched(scope));
+
+  // Only when the flag is in play, and only after a run has already ended: resolving both
+  // scopes on every run would make every success pay for a sentence it never prints.
+  if scope == Scope::Root
+    && let Some(config) = defining_config(name, loaded)
+  {
+    let _ = write!(
+      message,
+      "\n\n`--root` ignores {config}, which does define `{name}`.\ndrop `--root` to run it."
+    );
+
+    return message;
+  }
 
   if let Some(closest) = closest(name, defined.iter().copied()) {
     let _ = write!(message, "\n\ndid you mean `{closest}`?");
@@ -101,12 +118,34 @@ pub fn unknown(name: &str, loaded: &Loaded, scope: Scope) -> String {
     return message;
   }
 
-  message.push_str("\n\nscripts defined here:");
+  message.push_str(match scope {
+    Scope::Nearest => "\n\nscripts defined here:",
+    Scope::Root => "\n\nscripts at the repository root:",
+  });
   for name in defined {
     let _ = write!(message, "\n  {name}");
   }
 
   message
+}
+
+/// Where the name was looked for, when that is not simply where the user is standing.
+fn searched(scope: Scope) -> &'static str {
+  match scope {
+    Scope::Nearest => "",
+    Scope::Root => " at the repository root",
+  }
+}
+
+/// The config that defines `name` when the flag is dropped, when one does.
+///
+/// The outermost link of the chain is the definition of the name that was typed, which is
+/// the file a user has to open — not the base it may be built on.
+fn defining_config(name: &str, loaded: &Loaded) -> Option<String> {
+  let resolved = loaded.resolve(name, Scope::Nearest).ok().flatten()?;
+  let declared = resolved.chain.last()?;
+
+  Some(relative_to(&loaded.discovered.root, declared.source))
 }
 
 #[cfg(test)]

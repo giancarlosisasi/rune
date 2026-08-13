@@ -1,8 +1,12 @@
 //! Where rune's own output goes.
 //!
-//! Two rules this crate exists to enforce. Stdout belongs to the child process, so
-//! everything rune says about itself goes to stderr; only a command whose *product* is
-//! text — `rune list` — writes to stdout. And output goes through here rather than
+//! Two rules this crate exists to enforce. The first is about which stream, and it is a
+//! property of what is being written rather than a list of the commands that write it: a
+//! command whose *product* is text writes that text to stdout, everything rune says about
+//! itself goes to stderr, and a command that spawns a child leaves stdout to the child.
+//! `rune list` and `rune inspect` are examples of the rule, not the rule — a list of names
+//! goes stale the moment a query command is added, which is exactly how this comment came
+//! to name one of the two. The second rule is that output goes through here rather than
 //! through `println!`, which is why `print_stdout` and `print_stderr` are denied
 //! workspace-wide.
 //!

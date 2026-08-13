@@ -116,6 +116,9 @@ resolved through
   packages/legacy/rune.config.ts  test  appends `--maxWorkers=1`
 ```
 
+Each line names what that level declared, so a level that only set a variable or named a file says
+so instead of repeating a command it never touched.
+
 `rune list` annotates the same information more briefly: `(defined here)` for a script this package
 owns, `(narrowed here)` for one it narrows.
 

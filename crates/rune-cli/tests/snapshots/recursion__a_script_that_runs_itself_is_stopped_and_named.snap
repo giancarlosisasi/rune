@@ -1,0 +1,13 @@
+---
+source: crates/rune-cli/tests/recursion.rs
+description: a script whose command runs itself
+expression: stderr_of(&output)
+---
+rune has started rune 10 times, which is as deep as it goes
+
+a script whose command runs rune starts another rune, which starts another.
+this run is 10 levels down, so a script here runs itself without end.
+
+find the command that does it:
+
+  rune inspect loop

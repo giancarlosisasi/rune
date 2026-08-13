@@ -1,0 +1,18 @@
+---
+source: crates/rune-cli/tests/inspection.rs
+description: a chain where every level sets a variable
+expression: reported(&output)
+---
+probe:4
+
+command      node probe.mjs
+directory    .
+environment  LEVEL=two      this script's `env`
+             NODE_ENV=test  this script's `env`
+             TZ=CET         this script's `env`
+
+resolved through
+  rune.config.ts  probe:1  runs `node probe.mjs`, sets LEVEL, TZ
+  rune.config.ts  probe:2  sets LEVEL
+  rune.config.ts  probe:3  sets NODE_ENV
+  rune.config.ts  probe:4  sets TZ

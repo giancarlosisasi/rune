@@ -11,4 +11,4 @@ lifecycle    ends the whole tree after 600000 ms
 directory    .
 
 resolved through
-  rune.config.ts  e2e  runs `playwright test`
+  rune.config.ts  e2e  runs `playwright test`, declares timeout, retries, retryDelay

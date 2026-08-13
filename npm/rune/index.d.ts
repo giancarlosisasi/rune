@@ -97,7 +97,12 @@ export type CommandScript = Common &
     }
   > & {
     command: string | PerOsCommand;
-    /** Scripts that run, in order, before this one. */
+    /**
+     * Scripts that run, in order, before this one.
+     *
+     * Each dependent runs its own: two scripts naming the same prerequisite run it twice.
+     * rune has no task graph and does not deduplicate.
+     */
     dependsOn?: string[];
   };
 
@@ -108,6 +113,12 @@ export type ExtendsScript = Common &
     extends: string;
     /** Appended to the inherited command, after everything it already carries. */
     appendArgs?: string[];
+    /**
+     * Scripts that run, in order, before this one.
+     *
+     * Each dependent runs its own: two scripts naming the same prerequisite run it twice.
+     * rune has no task graph and does not deduplicate.
+     */
     dependsOn?: string[];
   };
 

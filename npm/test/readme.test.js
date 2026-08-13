@@ -36,3 +36,24 @@ test('the README says the config file must go in a task runner\'s inputs', () =>
   assert.match(readme, /rune\.config\.ts.*inputs/is);
   assert.match(readme, /turbo/i);
 });
+
+// Test R16.5 — the stream a command's product lands on is what a script consuming rune's
+// output is written against, and it was stated nowhere a user could reach.
+//
+// One paragraph has to carry the whole rule. Naming the two commands in one place and
+// stdout in another leaves a reader assembling it themselves, which is the state this
+// exists to end.
+test('the README states the stream rule in one place, naming both query commands', () => {
+  const readme = fs.readFileSync(README, 'utf8');
+  const stated = readme
+    .split(/\n\s*\n/)
+    .some(
+      (paragraph) =>
+        /rune list/.test(paragraph) &&
+        /rune inspect/.test(paragraph) &&
+        /stdout/i.test(paragraph) &&
+        /stderr/i.test(paragraph),
+    );
+
+  assert.ok(stated, 'no paragraph names both query commands and both streams');
+});

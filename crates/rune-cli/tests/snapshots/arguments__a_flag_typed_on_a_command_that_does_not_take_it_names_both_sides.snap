@@ -1,0 +1,13 @@
+---
+source: crates/rune-cli/tests/arguments.rs
+description: "--root typed on a command that has its own options"
+expression: stderr(&refused)
+---
+`--root` is not an option of `rune init`
+
+`rune init` accepts:
+  --from-package-json  Seed the starter with the scripts from that same package.json
+
+`--root` works on:
+  rune run
+  rune inspect

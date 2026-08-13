@@ -1,0 +1,12 @@
+---
+source: crates/rune-cli/tests/arguments.rs
+description: "--root typed on a command with no options at all"
+expression: stderr(&no_options)
+---
+`--root` is not an option of `rune list`
+
+`rune list` takes no options of its own.
+
+`--root` works on:
+  rune run
+  rune inspect

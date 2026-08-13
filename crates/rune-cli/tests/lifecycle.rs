@@ -59,6 +59,14 @@ fn a_flaky_script_is_retried_and_the_group_sees_one_success() {
   ))
   .args(["run", "both"])
   .stdout_regex(r"(?s).*")
+  // Exactly two lines for two steps: a retried script is announced once, because the
+  // retry loop sits inside the unit a group observes.
+  .stderr(
+    "
+    → work: flaky
+    → work: after
+    ",
+  )
   .status(0);
 
   let output = test.run();

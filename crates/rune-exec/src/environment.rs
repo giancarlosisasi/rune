@@ -20,7 +20,7 @@ use std::ffi::{OsStr, OsString};
 use std::fmt;
 use std::path::Path;
 
-use crate::bin_paths;
+use crate::{bin_paths, depth};
 
 /// The script rune was asked to run.
 pub const SCRIPT_NAME: &str = "RUNE_SCRIPT_NAME";
@@ -31,9 +31,9 @@ pub const PACKAGE_DIR: &str = "RUNE_PACKAGE_DIR";
 
 /// The names rune keeps for itself.
 ///
-/// The whole prefix rather than the three names above, so that a fourth variable later is
-/// not a breaking change. A config able to set these could tell a script it is running in
-/// a package it is not, and every tool downstream reading them would be lied to.
+/// The whole prefix rather than the names above, so that another variable later is not a
+/// breaking change. A config able to set these could tell a script it is running in a
+/// package it is not, and every tool downstream reading them would be lied to.
 pub const RESERVED_PREFIX: &str = "RUNE_";
 
 const PATH: &str = "PATH";
@@ -129,6 +129,12 @@ impl fmt::Display for Origin {
 }
 
 impl Origin {
+  /// Whether this is the named file, so a report can count what one file supplied and
+  /// what it lost.
+  pub fn is_file(&self, wanted: &str) -> bool {
+    matches!(self, Self::File { source, .. } if source == wanted)
+  }
+
   /// Where the assignment that lost was written. A file says which line, because that is
   /// what a user needs to go and find it — the name alone appears twice in the case this
   /// matters most.
@@ -166,12 +172,23 @@ impl Ignored {
   }
 }
 
+/// One value the child will see, and what put it there.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Applied {
+  pub value: String,
+  pub source: Origin,
+}
+
 /// The environment a child will run with, and what the config asked for that it will not.
 pub struct Layering {
   pub environment: ChildEnvironment,
-  /// What the config contributed and the child does see, by name. The rest of the
-  /// child's environment is inherited, so listing it would say nothing.
-  pub applied: BTreeMap<String, String>,
+  /// Every name the config had something to say about, with the value the child will see
+  /// and what put it there. The rest of the child's environment is inherited, so listing
+  /// it would say nothing.
+  ///
+  /// A name the process environment won is here too, holding the inherited value. Without
+  /// it a reader is told what was ignored and never told what happens instead.
+  pub applied: BTreeMap<String, Applied>,
   pub ignored: Vec<Ignored>,
 }
 
@@ -213,13 +230,23 @@ where
       }
 
       if let Some(holder) = owner.get(&lookup_key(name)) {
+        if *holder == Origin::Process
+          && let Some(inherited) = environment.get(name)
+        {
+          applied.entry(name.clone()).or_insert_with(|| Applied {
+            value: inherited.to_string_lossy().into_owned(),
+            source: Origin::Process,
+          });
+        }
+
         let reason = Reason::AlreadySet(holder.clone());
         ignored.push(Ignored { name: name.clone(), source, reason });
         continue;
       }
 
       environment.set(name, assignment.value.as_str());
-      applied.insert(name.clone(), assignment.value.clone());
+      let applied_here = Applied { value: assignment.value.clone(), source: source.clone() };
+      applied.insert(name.clone(), applied_here);
       owner.insert(lookup_key(name), source);
     }
   }
@@ -234,13 +261,17 @@ where
     }
 
     environment.set(name, value.as_str());
-    applied.insert(name.clone(), value.clone());
+    applied.insert(name.clone(), Applied { value: value.clone(), source: Origin::ScriptEnv });
   }
 
   // Last of all, so nothing a config wrote can tell a script it is running elsewhere.
+  // The depth is read here rather than passed in: this is the one place every child goes
+  // through, and the value it counts from is the one rune itself was started with.
+  let deeper = depth::of(environment.get(depth::VARIABLE)) + 1;
   environment.set(SCRIPT_NAME, descriptor.script_name);
   environment.set(ROOT, descriptor.root);
   environment.set(PACKAGE_DIR, descriptor.package_dir);
+  environment.set(depth::VARIABLE, deeper.to_string());
 
   Layering { environment, applied, ignored }
 }
@@ -305,7 +336,7 @@ mod tests {
   #[cfg(unix)]
   use super::ChildEnvironment;
   use super::{
-    Assignment, Descriptor, FileLayer, Origin, PACKAGE_DIR, ROOT, Reason, SCRIPT_NAME, build,
+    Assignment, Descriptor, FileLayer, Origin, PACKAGE_DIR, ROOT, Reason, SCRIPT_NAME, build, depth,
   };
 
   fn root() -> PathBuf {
@@ -356,6 +387,20 @@ mod tests {
     assert_eq!(environment.get(SCRIPT_NAME), Some(OsStr::new("test")));
     assert_eq!(environment.get(ROOT), Some(root.as_os_str()));
     assert_eq!(environment.get(PACKAGE_DIR), Some(package.as_os_str()));
+    assert_eq!(environment.get(depth::VARIABLE), Some(OsStr::new("1")));
+  }
+
+  /// The count carries across a level, so a chain of runes climbs rather than resetting.
+  #[test]
+  fn the_child_counts_one_deeper_than_rune_itself() {
+    let root = root();
+    let package = root.join("packages/foo");
+    let empty = BTreeMap::new();
+
+    let environment =
+      build(parent(&[(depth::VARIABLE, "4")]), &descriptor(&root, &package, &empty)).environment;
+
+    assert_eq!(environment.get(depth::VARIABLE), Some(OsStr::new("5")));
   }
 
   #[test]

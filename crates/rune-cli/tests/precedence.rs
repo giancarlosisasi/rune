@@ -160,20 +160,26 @@ fn the_precedence_table_holds_across_an_extends_chain() {
     Some(loaded.discovered.package_dir.as_os_str())
   );
 
-  // The delta is what the config contributed, so a variable that was merely inherited is
-  // not in it and a file assignment that was refused is not either.
-  let applied: Vec<(&str, &str)> =
-    layering.applied.iter().map(|(name, value)| (name.as_str(), value.as_str())).collect();
+  // The delta is every name the config had something to say about, each with the value
+  // the child will see and what put it there. A variable that was merely inherited is not
+  // in it. `PROCESS_AND_FILES` is: the config assigned it and lost, and a delta that
+  // dropped the row would say what was ignored and never what the child gets.
+  let applied: Vec<(&str, &str, String)> = layering
+    .applied
+    .iter()
+    .map(|(name, applied)| (name.as_str(), applied.value.as_str(), applied.source.to_string()))
+    .collect();
   assert_eq!(
     applied,
     [
-      ("BOTH_FILES", "package-file"),
-      ("MAP_BEATS_FILE", "map"),
-      ("MAP_BEATS_PROCESS", "map"),
-      ("MAP_OVERRIDES_MAP", "package-map"),
-      ("ONLY_PACKAGE_FILE", "package-file"),
-      ("ONLY_ROOT_FILE", "root-file"),
-      ("ONLY_ROOT_MAP", "root-map"),
+      ("BOTH_FILES", "package-file", "`packages/legacy/.env`".to_owned()),
+      ("MAP_BEATS_FILE", "map", "this script's `env`".to_owned()),
+      ("MAP_BEATS_PROCESS", "map", "this script's `env`".to_owned()),
+      ("MAP_OVERRIDES_MAP", "package-map", "this script's `env`".to_owned()),
+      ("ONLY_PACKAGE_FILE", "package-file", "`packages/legacy/.env`".to_owned()),
+      ("ONLY_ROOT_FILE", "root-file", "`.env`".to_owned()),
+      ("ONLY_ROOT_MAP", "root-map", "this script's `env`".to_owned()),
+      ("PROCESS_AND_FILES", "process", "the process environment".to_owned()),
     ]
   );
 

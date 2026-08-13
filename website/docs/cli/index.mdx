@@ -40,11 +40,19 @@ Options:
 
 ## Streams
 
-Standard output belongs to the script. Every Rune diagnostic and warning goes to standard error, on
-every platform, so `rune run build > artifact.txt` captures the build's bytes and nothing of Rune's.
+The rule is about what is being written, not about which command is writing it. A command whose
+product is text writes that text to standard output. Everything Rune says about itself — warnings,
+diagnostics, failures — goes to standard error, on every platform. A command that spawns a child
+gives standard output to the child.
 
-Two commands have text as their product and write it to standard output: `rune list` and
-`rune inspect`. `rune init` writes a file, and reports the path it wrote on standard error.
+`rune list` and `rune inspect` are the two whose product is text, so both write their report to
+standard output. `rune run` hands the stream to the script, which is why
+`rune run build > artifact.txt` captures the build's bytes and nothing of Rune's. `rune init` writes
+a file, and reports the path it wrote on standard error.
+
+A failed query is a diagnostic, not a product. `rune inspect nope` writes its message to standard
+error and leaves standard output empty, so a pipeline reading the report never receives a complaint
+in its place.
 
 ## Colour
 

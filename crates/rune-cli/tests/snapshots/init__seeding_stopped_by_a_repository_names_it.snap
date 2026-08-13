@@ -1,0 +1,12 @@
+---
+source: crates/rune-cli/tests/init.rs
+description: seeding from inside a repository that holds no manifest
+expression: "redact(test.dir(), &stderr_of(&output))"
+---
+no package.json found
+
+searched upward from [TMP]/packages/ui and stopped at [TMP], the top of this repository.
+
+add a package.json to this repository, or write a config without seeding:
+
+  rune init

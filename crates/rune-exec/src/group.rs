@@ -54,12 +54,33 @@ pub struct Member<'a> {
   pub task: Task<'a>,
 }
 
+/// One step of a sequence: the script it stands for, why it is in the list, and what it
+/// runs. The first two are what a run says about a step while the step is happening.
+pub struct Step<'a> {
+  pub name: String,
+  pub role: Role,
+  pub task: Task<'a>,
+}
+
+/// How a step came to be in the sequence it is in. It decides what is said about it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Role {
+  /// Named by the group that holds it. Announced as it starts, and named when it fails.
+  Member,
+  /// Named by the script that has to wait for it. Named only when it fails: `dependsOn`
+  /// exists to be invisible when it works.
+  Prerequisite,
+  /// The declaring script's own command. The user asked for it by name, so its exit code
+  /// is already an answer they can attribute.
+  Own,
+}
+
 /// Everything one `rune run` invocation stands for.
 pub enum Task<'a> {
   /// One command, and one child process.
   Command(ExecRequest<'a>),
   /// Each step run to completion, in order.
-  Serial { steps: Vec<Task<'a>>, continue_on_error: bool },
+  Serial { script: String, steps: Vec<Step<'a>>, continue_on_error: bool },
   /// Every member started at once, and all of them waited for.
   Parallel { members: Vec<Member<'a>>, continue_on_error: bool, policy: SuccessPolicy },
 }
@@ -168,7 +189,7 @@ async fn guard(root: &Control, closed: Option<oneshot::Receiver<()>>) {
 fn out_of_reach(task: &Task<'_>) -> bool {
   match task {
     Task::Command(request) => request.wants_own_group(),
-    Task::Serial { steps, .. } => steps.iter().any(out_of_reach),
+    Task::Serial { steps, .. } => steps.iter().any(|step| out_of_reach(&step.task)),
     Task::Parallel { members, .. } => members.iter().any(|member| out_of_reach(&member.task)),
   }
 }
@@ -207,7 +228,7 @@ fn label(task: &Task<'_>, next: &mut ScriptId, names: &mut Vec<String>) -> Label
     Task::Command(_) => Labels::default(),
     Task::Serial { steps, .. } => Labels {
       members: Vec::new(),
-      children: steps.iter().map(|step| label(step, next, names)).collect(),
+      children: steps.iter().map(|step| label(&step.task, next, names)).collect(),
     },
     Task::Parallel { members, .. } => {
       // A group of one has nothing to disambiguate, so it takes no ids and its member
@@ -370,8 +391,8 @@ fn step<'f>(
   Box::pin(async move {
     match task {
       Task::Command(request) => attempts(request, sink, run, control).await,
-      Task::Serial { steps, continue_on_error } => {
-        serial(steps, labels, *continue_on_error, sink, run, control).await
+      Task::Serial { script, steps, continue_on_error } => {
+        serial(script, steps, labels, *continue_on_error, sink, run, control).await
       }
       Task::Parallel { members, continue_on_error, policy } => {
         parallel(members, labels, *continue_on_error, *policy, sink, run, control).await
@@ -382,7 +403,8 @@ fn step<'f>(
 
 /// Runs each step to completion, in order, and reports how the whole sequence ended.
 async fn serial(
-  steps: &[Task<'_>],
+  script: &str,
+  steps: &[Step<'_>],
   labels: &Labels,
   continue_on_error: bool,
   sink: Sink,
@@ -392,7 +414,7 @@ async fn serial(
   let mut failure = None;
   let mut caught = None;
 
-  for (index, task) in steps.iter().enumerate() {
+  for (index, current) in steps.iter().enumerate() {
     // Nothing new starts once a signal has arrived or a sibling has failed. The flag
     // travels with the previous step's result rather than in a global, so a caller cannot
     // silently skip reading it.
@@ -400,10 +422,18 @@ async fn serial(
       break;
     }
 
-    let completion = step(task, child(labels, index), sink, run, control).await?;
+    if current.role == Role::Member {
+      rune_out::diagnostic(&starting(script, &current.name));
+    }
+
+    let completion = step(&current.task, child(labels, index), sink, run, control).await?;
     caught = caught.or(completion.caught_signal);
 
     if completion.code != 0 {
+      // Said where it happened, so a red log holds the account above the output it
+      // explains rather than after everything the run went on to write.
+      announce_failure(script, current, index, steps.len(), completion.code);
+
       // The first failure's code, never the last. In a serial run first-in-time is also
       // first-in-list, so it is the failure the user reads at the top of the log.
       failure.get_or_insert(completion.code);
@@ -415,6 +445,32 @@ async fn serial(
   }
 
   Ok(Completion { code: failure.unwrap_or(0), caught_signal: caught })
+}
+
+/// A step of a group, as it starts. A step that prints nothing of its own would otherwise
+/// leave a log where not running and running silently look the same.
+fn starting(script: &str, member: &str) -> String {
+  format!("→ {script}: {member}")
+}
+
+/// What a failed step is worth saying, which is not the same for the three roles.
+///
+/// A member is what the group is made of, so the group names it and says where in the
+/// sequence it sits. A prerequisite is invisible until it fails, and then the only thing
+/// the user has is an exit code from a script they never named. A script's own command
+/// needs neither: they asked for it by name.
+fn announce_failure(script: &str, step: &Step<'_>, index: usize, total: usize, code: u32) {
+  let line = match step.role {
+    Role::Member => {
+      format!("{script} failed at step {} of {total}: `{}` exited {code}", index + 1, step.name)
+    }
+    Role::Prerequisite => {
+      format!("{script} stopped: prerequisite `{}` exited {code}", step.name)
+    }
+    Role::Own => return,
+  };
+
+  rune_out::diagnostic(&line);
 }
 
 /// Starts every member at once, waits for all of them, and answers for the group.

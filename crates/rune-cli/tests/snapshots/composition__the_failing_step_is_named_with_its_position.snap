@@ -1,0 +1,7 @@
+---
+source: crates/rune-cli/tests/composition.rs
+expression: stderr(&output)
+---
+→ ci: lint
+→ ci: build
+ci failed at step 2 of 3: `build` exited 42

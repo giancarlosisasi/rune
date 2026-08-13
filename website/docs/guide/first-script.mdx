@@ -66,8 +66,8 @@ Before spawning, Rune builds the child's environment in layers. Later layers win
    prepended, most specific first. This is what makes the bare name `vitest` resolve.
 3. The script's `envFile`, filling gaps only. It never overrides a variable that is already set.
 4. The script's own `env` map, which wins over everything above it.
-5. `RUNE_SCRIPT_NAME`, `RUNE_ROOT` and `RUNE_PACKAGE_DIR`, applied last so nothing a config wrote
-   can tell a script it is running somewhere it is not.
+5. `RUNE_SCRIPT_NAME`, `RUNE_ROOT`, `RUNE_PACKAGE_DIR` and `RUNE_DEPTH`, applied last so nothing a
+   config wrote can tell a script it is running somewhere it is not.
 
 [Environment](/config/environment) has the full precedence table.
 

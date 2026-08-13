@@ -104,6 +104,30 @@ fn the_child_environment_layers_correctly() {
   );
 }
 
+/// Test R19.3 — the count that lets rune notice it is calling itself, read back out of
+/// the child that carries it.
+///
+/// One more than the value rune was started with, both times. A child told the same depth
+/// as its parent would leave every level of a chain reading the same number, and the
+/// count would never reach anything.
+#[test]
+fn the_child_is_told_how_deep_rune_has_spawned_itself() {
+  let probe = || {
+    Test::new()
+      .config(&config(&format!(r#"{{ probe: {{ command: "{TOOL} report-env" }} }}"#)))
+      .tool(&format!("node_modules/.bin/{TOOL}"))
+      .args(["run", "probe"])
+      .stdout_regex(r"(?s)^\{.*\}\n$")
+      .status(0)
+  };
+
+  let first = report_of(&probe().env_remove("RUNE_DEPTH").run().stdout);
+  assert_eq!(first["env"]["RUNE_DEPTH"], "1", "the first rune of a chain");
+
+  let nested = report_of(&probe().env("RUNE_DEPTH", "4").run().stdout);
+  assert_eq!(nested["env"]["RUNE_DEPTH"], "5", "a rune that was itself started by one");
+}
+
 /// Test 3.7, first of three. Kept apart from the environment row so none of them can
 /// pass by accident.
 #[test]
