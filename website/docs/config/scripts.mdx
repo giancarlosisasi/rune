@@ -143,12 +143,16 @@ about "the shape" useless.
 | --- | --- |
 | No variant key | ``script `empty` has no command``, then ``every script needs one of: `command`, `extends`, `serial`, `parallel` `` |
 | Two variant keys | ``script `ci` sets both `command` and `extends``` , then what each one does |
-| Misspelled field | ``script `test` has an unknown field `comand```, then the fields allowed there |
+| Misspelled field | ``script `test` has an unknown field `comand```, the fields allowed there, and ``did you mean `command`?`` |
 | Entry is not an object | ``script `dev` must be an object; found a string`` |
 | Not a default-exported object | ``rune.config.ts: a rune config must default-export an object``, with an example |
 | Per-OS `command` with no `default` | ``script `clean` has a per-operating-system `command` with no `default` `` |
 
 An unknown field is an error rather than a warning. Silent acceptance of `retires` instead of
 `retries` means the option never takes effect and nothing says so.
+
+The field named is always one to change. Misspelling the field that says which kind of script an entry
+is — `paralell` for `parallel` — is reported as that word, not as one of the fields that are still
+correct beside it.
 
 Diagnostics go to stderr on every platform. Standard output belongs to the script.
