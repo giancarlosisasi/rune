@@ -12,6 +12,8 @@ use std::time::Duration;
 use serde::Deserialize;
 use thiserror::Error;
 
+use crate::suggest::{closest, did_you_mean};
+
 /// The keys that decide which kind of script an entry is. Each later change adds one.
 const DISCRIMINANTS: &[&str] = &["command", "extends", "serial", "parallel"];
 
@@ -68,8 +70,25 @@ const FALLBACK_KEY: &str = "default";
 
 #[derive(Debug, Error)]
 pub enum SchemaError {
-  #[error("the config must be an object with a `scripts` object; found {found}")]
-  NotAConfig { found: String },
+  #[error(
+    "the config has no `scripts`\n\n\
+     every script rune can run is an entry in it:\n\n  \
+     export default {{\n    \
+     scripts: {{\n      \
+     dev: {{ command: \"vite\" }},\n    \
+     }},\n  \
+     }};"
+  )]
+  NoScripts,
+
+  #[error(
+    "the config's `scripts` must be an object; found {found}\n\n\
+     `scripts` maps each name to what that name runs:\n\n  \
+     scripts: {{\n    \
+     dev: {{ command: \"vite\" }},\n  \
+     }}"
+  )]
+  ScriptsShape { found: String },
 
   #[error("script `{script}` must be an object; found {found}")]
   NotAScript { script: String, found: String },
@@ -94,8 +113,11 @@ pub enum SchemaError {
   )]
   AppendArgsWithoutExtends { script: String },
 
-  #[error("script `{script}` has an unknown field `{field}`\n\nallowed here: {allowed}")]
-  UnknownField { script: String, field: String, allowed: String },
+  #[error(
+    "script `{script}` has an unknown field `{field}`\n\nallowed here: {allowed}{}",
+    did_you_mean(.suggestion.as_deref())
+  )]
+  UnknownField { script: String, field: String, allowed: String, suggestion: Option<String> },
 
   #[error(
     "script `{script}` has a `command` that is {found}\n\n\
@@ -468,10 +490,12 @@ struct Common {
 
 /// Turns an evaluated config into the typed shape, or says exactly what is wrong with it.
 pub fn parse(value: &serde_json::Value) -> Result<Config, SchemaError> {
-  let scripts = value
-    .get("scripts")
-    .and_then(serde_json::Value::as_object)
-    .ok_or_else(|| SchemaError::NotAConfig { found: describe(value) })?;
+  // Two unrelated mistakes, each with its own repair: the key was never written, or it
+  // holds something a script map cannot be. One sentence for both described the config the
+  // same sentence had just asked for, and reported finding an object when it wanted one.
+  let scripts = value.get("scripts").ok_or(SchemaError::NoScripts)?;
+  let scripts =
+    scripts.as_object().ok_or_else(|| SchemaError::ScriptsShape { found: describe(scripts) })?;
 
   let mut parsed = BTreeMap::new();
   for (name, entry) in scripts {
@@ -495,6 +519,16 @@ fn parse_script(name: &str, entry: &serde_json::Value) -> Result<Script, SchemaE
       second: (*second).to_owned(),
     });
   }
+
+  // What a message prints stays specific to the entry: the variant's own set once the kind
+  // can be read, the kind selectors and the common fields while it cannot.
+  let allowed = found.map_or_else(allowed_without_a_kind, |kind| allowed_for(kind));
+
+  // Ahead of every rule that depends on the kind, because losing the field that names the
+  // kind makes the entry's remaining correct fields illegal for the kind rune then infers.
+  // Reporting one of those names a field the user must not change and never the misspelled
+  // one, and this is the only pass that can still tell the difference.
+  reject_foreign_fields(name, object, &allowed)?;
 
   // Before the discriminant dispatch, so that the message is about the mistake the user
   // made rather than about a field that happens to be unknown to the arm they landed in.
@@ -532,51 +566,27 @@ fn parse_script(name: &str, entry: &serde_json::Value) -> Result<Script, SchemaE
     return Err(SchemaError::SuccessPolicyOnSerial { script: name.to_owned() });
   }
 
+  // What is left is a field some other kind allows, which is a fact about the kind rather
+  // than about the field. Checked before deserializing so the message can name the script:
+  // serde's own unknown-field error knows the field but not which entry it came from.
+  reject_unknown_fields(name, object, &allowed)?;
+
   let Some(discriminant) = found else {
-    // A misspelled discriminant is indistinguishable from a missing one, and it is by
-    // far the likelier mistake, so name the offending word when there is one.
-    // `dependsOn` is legal beside any variant but is not one, so an entry carrying only
-    // that is missing a discriminant rather than holding an unknown field.
-    let mut legal = DISCRIMINANTS.to_vec();
-    legal.push(DEPENDS_ON);
-    reject_unknown_fields(name, object, &allowed_with(&legal))?;
     return Err(SchemaError::NoDiscriminant { script: name.to_owned() });
   };
 
   let kind = match *discriminant {
-    "command" => {
-      // Checked before deserializing so the message can name the script. serde's own
-      // unknown-field error knows the field but not which entry it came from.
-      reject_unknown_fields(name, object, &allowed_to_run(&["command", DEPENDS_ON, INTERACTIVE]))?;
-      Kind::Command(parse_command(name, &object["command"])?)
-    }
-    "extends" => {
-      reject_unknown_fields(
-        name,
-        object,
-        &allowed_to_run(&["extends", APPEND_ARGS, DEPENDS_ON, INTERACTIVE]),
-      )?;
-      parse_extends(name, object)?
-    }
-    "serial" => {
-      reject_unknown_fields(name, object, &allowed_with(&["serial", CONTINUE_ON_ERROR]))?;
-      Kind::Serial {
-        members: string_list(name, "serial", &object["serial"], SERIAL_LIST)?,
-        continue_on_error: parse_continue_on_error(name, object)?,
-      }
-    }
-    "parallel" => {
-      reject_unknown_fields(
-        name,
-        object,
-        &allowed_with(&["parallel", CONTINUE_ON_ERROR, SUCCESS_POLICY]),
-      )?;
-      Kind::Parallel {
-        members: string_list(name, "parallel", &object["parallel"], PARALLEL_LIST)?,
-        continue_on_error: parse_continue_on_error(name, object)?,
-        policy: parse_success_policy(name, object)?,
-      }
-    }
+    "command" => Kind::Command(parse_command(name, &object["command"])?),
+    "extends" => parse_extends(name, object)?,
+    "serial" => Kind::Serial {
+      members: string_list(name, "serial", &object["serial"], SERIAL_LIST)?,
+      continue_on_error: parse_continue_on_error(name, object)?,
+    },
+    "parallel" => Kind::Parallel {
+      members: string_list(name, "parallel", &object["parallel"], PARALLEL_LIST)?,
+      continue_on_error: parse_continue_on_error(name, object)?,
+      policy: parse_success_policy(name, object)?,
+    },
     other => unreachable!("`{other}` is listed as a discriminant but has no arm"),
   };
 
@@ -811,14 +821,8 @@ fn parse_command(script: &str, value: &serde_json::Value) -> Result<Command, Sch
     return Err(SchemaError::CommandShape { script: script.to_owned(), found: describe(value) });
   };
 
-  for key in object.keys() {
-    if !PER_OS_KEYS.contains(&key.as_str()) {
-      return Err(SchemaError::UnknownField {
-        script: script.to_owned(),
-        field: key.clone(),
-        allowed: list(PER_OS_KEYS),
-      });
-    }
+  if let Some(key) = object.keys().find(|key| !PER_OS_KEYS.contains(&key.as_str())) {
+    return Err(unknown_field(script, key, PER_OS_KEYS));
   }
 
   let entry = |key: &str| -> Result<Option<String>, SchemaError> {
@@ -856,21 +860,79 @@ fn allowed_to_run(specific: &[&'static str]) -> Vec<&'static str> {
     .collect()
 }
 
+/// The fields one kind of script may carry, named by the discriminant that decides it.
+fn allowed_for(discriminant: &str) -> Vec<&'static str> {
+  match discriminant {
+    "command" => allowed_to_run(&["command", DEPENDS_ON, INTERACTIVE]),
+    "extends" => allowed_to_run(&["extends", APPEND_ARGS, DEPENDS_ON, INTERACTIVE]),
+    "serial" => allowed_with(&["serial", CONTINUE_ON_ERROR]),
+    "parallel" => allowed_with(&["parallel", CONTINUE_ON_ERROR, SUCCESS_POLICY]),
+    other => unreachable!("`{other}` is listed as a discriminant but has no fields"),
+  }
+}
+
+/// The fields legal while the kind cannot be read: the selectors themselves, and what is
+/// legal beside any of them.
+///
+/// `dependsOn` belongs here because it is legal next to every variant without being one, so
+/// an entry carrying only that is missing a kind rather than holding an unknown field.
+fn allowed_without_a_kind() -> Vec<&'static str> {
+  let mut selectors = DISCRIMINANTS.to_vec();
+  selectors.push(DEPENDS_ON);
+  allowed_with(&selectors)
+}
+
+/// Every field some kind of script may carry.
+///
+/// Joined from the sets above rather than written out, so a field a later variant adds is
+/// covered here without being listed twice — and so this can never refuse a field one of
+/// those sets prints as allowed.
+fn any_field() -> Vec<&'static str> {
+  DISCRIMINANTS
+    .iter()
+    .flat_map(|discriminant| allowed_for(discriminant))
+    .chain(allowed_without_a_kind())
+    .collect()
+}
+
+/// A field no kind of script may carry, refused before the kind is read.
+///
+/// "In no rule set" is a fact about the entry and "not allowed here" is a fact about the
+/// kind rune inferred, and only the first can be stated when the misspelled field is the one
+/// that names the kind.
+fn reject_foreign_fields(
+  script: &str,
+  object: &serde_json::Map<String, serde_json::Value>,
+  allowed: &[&'static str],
+) -> Result<(), SchemaError> {
+  let known = any_field();
+
+  match object.keys().find(|field| !known.contains(&field.as_str())) {
+    Some(field) => Err(unknown_field(script, field, allowed)),
+    None => Ok(()),
+  }
+}
+
 fn reject_unknown_fields(
   script: &str,
   object: &serde_json::Map<String, serde_json::Value>,
   allowed: &[&'static str],
 ) -> Result<(), SchemaError> {
-  for field in object.keys() {
-    if !allowed.contains(&field.as_str()) {
-      return Err(SchemaError::UnknownField {
-        script: script.to_owned(),
-        field: field.clone(),
-        allowed: list(allowed),
-      });
-    }
+  match object.keys().find(|field| !allowed.contains(&field.as_str())) {
+    Some(field) => Err(unknown_field(script, field, allowed)),
+    None => Ok(()),
   }
-  Ok(())
+}
+
+/// The suggestion is drawn from the list the message is about to print, so the two cannot
+/// disagree about what is legal in this position.
+fn unknown_field(script: &str, field: &str, allowed: &[&'static str]) -> SchemaError {
+  SchemaError::UnknownField {
+    script: script.to_owned(),
+    field: field.to_owned(),
+    allowed: list(allowed),
+    suggestion: closest(field, allowed.iter().copied()).map(str::to_owned),
+  }
 }
 
 fn describe(value: &serde_json::Value) -> String {
@@ -1053,6 +1115,142 @@ mod tests {
 
     assert!(error.contains("`test`"), "{error}");
     assert!(error.contains("`comand`"), "{error}");
+  }
+
+  /// Test R24.1 — the field naming the kind, misspelled, and everything else correct.
+  ///
+  /// Losing that field drops the entry into the rule set for a kind rune could not read,
+  /// where the fields that are still right genuinely are not allowed. Naming one of those
+  /// sends the reader to a line they must not change, so what the message leaves out is
+  /// asserted beside what it says.
+  #[test]
+  fn a_misspelled_kind_is_named_and_the_correct_fields_are_not() {
+    let error = parse(&json!({
+      "scripts": {
+        "check": {
+          "paralell": ["lint", "format", "typecheck"],
+          "continueOnError": true,
+          "description": "lint, format and types at once"
+        }
+      }
+    }))
+    .unwrap_err()
+    .to_string();
+
+    assert!(!error.contains("continueOnError"), "a field the user must not change: {error}");
+
+    insta::with_settings!({ description => "a group whose `parallel` is misspelled" }, {
+      insta::assert_snapshot!(error);
+    });
+  }
+
+  /// Test R24.2 — the same mistake where the field left behind has a rule of its own.
+  ///
+  /// `appendArgs` without `extends` is a real rule and a good message, and it is the wrong
+  /// answer here: it describes the kind rune inferred rather than the word the user typed.
+  #[test]
+  fn a_misspelled_extends_is_named_rather_than_the_arguments_beside_it() {
+    let error = parse(&json!({
+      "scripts": { "test:ci": { "extnds": "test", "appendArgs": ["--run"] } }
+    }))
+    .unwrap_err()
+    .to_string();
+
+    assert!(error.contains("`extnds`"), "{error}");
+    assert!(!error.contains("appendArgs"), "{error}");
+  }
+
+  /// Test R24.3 — one transposition, in the one place the crate's matcher was not wired up.
+  #[test]
+  fn a_misspelled_field_is_offered_its_spelling() {
+    let error =
+      parse(&json!({ "scripts": { "test": { "commnd": "vitest" } } })).unwrap_err().to_string();
+
+    assert!(error.contains("did you mean `command`?"), "{error}");
+  }
+
+  /// Test R24.4 — a suggestion that is wrong costs more than no suggestion at all.
+  #[test]
+  fn a_field_close_to_nothing_legal_is_offered_nothing() {
+    let error = parse(&json!({ "scripts": { "test": { "command": "vitest", "webpack": 1 } } }))
+      .unwrap_err()
+      .to_string();
+
+    assert!(error.contains("`webpack`"), "{error}");
+    assert!(!error.contains("did you mean"), "{error}");
+  }
+
+  /// Test R24.8 — the set a field is checked against is every field any kind allows; the
+  /// set the message prints stays the one that applies where the field was written.
+  ///
+  /// Printing the union would tell a reader a group may carry `retries`, which is the
+  /// opposite mistake to the one this change repairs.
+  #[test]
+  fn the_allowed_list_stays_specific_to_the_entry() {
+    let running = parse(&json!({ "scripts": { "a": { "command": "x", "webpack": 1 } } }))
+      .unwrap_err()
+      .to_string();
+    assert!(running.contains("`timeout`"), "a command script may say how it is run: {running}");
+
+    let group = parse(&json!({ "scripts": { "a": { "serial": ["b"], "webpack": 1 } } }))
+      .unwrap_err()
+      .to_string();
+    assert!(group.contains("`continueOnError`"), "a group's own field is missing: {group}");
+    assert!(!group.contains("`timeout`"), "a group is not a process: {group}");
+
+    let unreadable =
+      parse(&json!({ "scripts": { "a": { "webpack": 1 } } })).unwrap_err().to_string();
+    assert!(unreadable.contains("`parallel`"), "the kind selectors are missing: {unreadable}");
+    assert!(!unreadable.contains("`timeout`"), "the kind is not known: {unreadable}");
+  }
+
+  /// Test R24.10 — the one way a check placed ahead of the kind dispatch breaks a config
+  /// that works today.
+  #[test]
+  fn every_legal_variant_still_parses() {
+    parse(&json!({
+      "scripts": {
+        "test": { "command": "vitest", "dependsOn": ["build"], "timeout": 1000, "interactive": true, "cwd": "apps/api", "env": { "CI": "1" }, "envFile": ".env", "description": "d" },
+        "test:ci": { "extends": "test", "appendArgs": ["--run"], "retries": 2, "killSignal": "SIGINT" },
+        "ci": { "serial": ["test"], "continueOnError": true, "description": "d" },
+        "dev": { "parallel": ["test"], "continueOnError": true, "successPolicy": "first" },
+      }
+    }))
+    .expect("every legal variant parses");
+  }
+
+  /// Test R24.5 — one sentence answered two unrelated mistakes, and contradicted itself
+  /// doing it: what it reported having found was the config it had just asked for.
+  #[test]
+  fn a_missing_scripts_key_and_an_unusable_one_read_differently() {
+    let missing = parse(&json!({ "name": "x" })).unwrap_err().to_string();
+    let unusable = parse(&json!({ "scripts": [] })).unwrap_err().to_string();
+
+    assert_ne!(missing, unusable);
+    for message in [&missing, &unusable] {
+      assert!(!message.contains("found an object"), "{message}");
+    }
+
+    insta::with_settings!({ description => "no `scripts` key, and a `scripts` that is a list" }, {
+      insta::assert_snapshot!(format!("{missing}\n\n---\n\n{unusable}"));
+    });
+  }
+
+  /// Test R24.6 — the reported value is the one that is wrong, and four ways of writing it
+  /// wrong read as four different things.
+  #[test]
+  fn the_kind_of_value_under_scripts_is_named() {
+    let messages: Vec<String> = [json!([]), json!("hello"), json!(42), json!(null)]
+      .into_iter()
+      .map(|value| parse(&json!({ "scripts": value })).unwrap_err().to_string())
+      .collect();
+
+    for message in &messages {
+      assert!(message.contains("`scripts`"), "{message}");
+    }
+
+    let distinct: std::collections::BTreeSet<&String> = messages.iter().collect();
+    assert_eq!(distinct.len(), messages.len(), "{messages:?}");
   }
 
   /// Test 2.14 — listing the legal discriminants matters more as later changes add them.

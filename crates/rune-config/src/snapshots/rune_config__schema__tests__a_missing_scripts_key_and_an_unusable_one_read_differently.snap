@@ -1,0 +1,24 @@
+---
+source: crates/rune-config/src/schema.rs
+description: "no `scripts` key, and a `scripts` that is a list"
+expression: "format!(\"{missing}\\n\\n---\\n\\n{unusable}\")"
+---
+the config has no `scripts`
+
+every script rune can run is an entry in it:
+
+  export default {
+    scripts: {
+      dev: { command: "vite" },
+    },
+  };
+
+---
+
+the config's `scripts` must be an object; found an array
+
+`scripts` maps each name to what that name runs:
+
+  scripts: {
+    dev: { command: "vite" },
+  }

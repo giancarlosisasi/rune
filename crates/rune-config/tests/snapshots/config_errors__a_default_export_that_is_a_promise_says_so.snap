@@ -1,0 +1,10 @@
+---
+source: crates/rune-config/tests/config_errors.rs
+description: a config exporting a promise of its scripts
+expression: failure(&dir)
+---
+rune.config.ts: a rune config must default-export an object; this one exports a promise
+
+rune evaluates a config to completion before any script starts, so a config that computes its scripts waits for that work itself:
+
+  export default await buildScripts();

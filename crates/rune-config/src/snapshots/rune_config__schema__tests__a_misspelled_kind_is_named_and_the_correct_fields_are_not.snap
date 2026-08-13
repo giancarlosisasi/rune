@@ -1,0 +1,10 @@
+---
+source: crates/rune-config/src/schema.rs
+description: "a group whose `parallel` is misspelled"
+expression: error
+---
+script `check` has an unknown field `paralell`
+
+allowed here: `command`, `extends`, `serial`, `parallel`, `dependsOn`, `description`, `cwd`, `env`, `envFile`
+
+did you mean `parallel`?

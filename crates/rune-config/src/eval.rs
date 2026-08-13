@@ -293,6 +293,10 @@ pub fn evaluate_config(
     install(&ctx, &observed).map_err(|error| runtime_error(&error, &shown))?;
 
     let value = match evaluate_entry(&ctx, &key, code, &shown, &ceilings, &imports) {
+      // A promise is an object, so nothing downstream can tell one apart: it becomes an
+      // empty config and is reported as an object, which is the one word that does not
+      // lead anybody to the missing `await`.
+      Ok(value) if value.is_promise() => return Err(unawaited_default_export(&shown)),
       Ok(value) => to_json(&value, &shown)?,
       // A ceiling is why this evaluation ended, whatever it was doing at the time.
       Err(caught) if caught.is_ceiling() => return Err(caught),
@@ -452,6 +456,22 @@ fn missing_default_export(entry: &Shown) -> EvalError {
               dev: { command: \"vite\" },\n    \
               },\n  \
               };"
+      .to_owned(),
+  }
+}
+
+/// A config that exported the work instead of what the work produced.
+///
+/// The repair is one word, and naming the promise is what leads a reader to it. A config is
+/// evaluated to completion before any script starts, so `await` at the top level is
+/// supported and is the whole of the fix.
+fn unawaited_default_export(entry: &Shown) -> EvalError {
+  EvalError::Shape {
+    path: entry.clone(),
+    message: "a rune config must default-export an object; this one exports a promise\n\n\
+              rune evaluates a config to completion before any script starts, so a config \
+              that computes its scripts waits for that work itself:\n\n  \
+              export default await buildScripts();"
       .to_owned(),
   }
 }

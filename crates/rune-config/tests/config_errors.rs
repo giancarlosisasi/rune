@@ -307,6 +307,35 @@ fn a_refusal_with_no_span_keeps_its_shape() {
   assert!(!names_a_line(&message), "a position was invented:\n{message}");
 }
 
+/// Test R24.7 — a config that exports the work rather than what the work produced.
+///
+/// A promise is an object to everything downstream, so it becomes an empty config and is
+/// reported as an object. "A promise" is the one word that leads a reader to the `await`
+/// they left out.
+#[test]
+fn a_default_export_that_is_a_promise_says_so() {
+  let dir = fixture(&[("rune.config.ts", "export default Promise.resolve({ scripts: {} });\n")]);
+
+  insta::with_settings!({ description => "a config exporting a promise of its scripts" }, {
+    insta::assert_snapshot!(failure(&dir));
+  });
+}
+
+/// Test R24.9 — the sibling message, which is right already and sits one branch away from
+/// everything the promise case changes.
+#[test]
+fn a_default_export_that_is_not_an_object_keeps_its_message() {
+  for (kind, config) in
+    [("no default export", "export const x = 1;\n"), ("a number", "export default 42;\n")]
+  {
+    let dir = fixture(&[("rune.config.ts", config)]);
+    let message = failure(&dir);
+
+    assert!(message.contains("must default-export an object"), "{kind}: {message}");
+    assert!(message.contains("dev: { command: \"vite\" }"), "{kind} lost the example: {message}");
+  }
+}
+
 /// The redaction has to be able to fail, or every row above it passes by not looking.
 #[test]
 fn the_absolute_path_oracle_can_fail() {
