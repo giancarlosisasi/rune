@@ -7,9 +7,40 @@
 //! The map is built here, on the failure path only. A config that does not throw never
 //! pays for it.
 
+use std::ops::Range;
 use std::path::Path;
 
 use crate::strip::strip_types_with_map;
+
+/// Where one `at name (file:line:column)` frame points.
+pub struct Frame<'a> {
+  pub path: &'a str,
+  pub row: u32,
+  pub column: u32,
+  /// Where `file:line:column` sits inside the frame, for rewriting it in place.
+  position: Range<usize>,
+}
+
+/// Reads a stack frame, or nothing for a line that is not one.
+///
+/// The one place that knows the shape of a frame. Every reader of a trace comes through
+/// here, so a second reader cannot come to a different answer about the same line.
+pub fn frame(line: &str) -> Option<Frame<'_>> {
+  let open = line.find('(')?;
+  let close = line.rfind(')')?;
+  let location = line.get(open + 1..close)?;
+
+  // Split from the right: a Windows path carries its own colon in `D:\`.
+  let (rest, column) = location.rsplit_once(':')?;
+  let (path, row) = rest.rsplit_once(':')?;
+
+  Some(Frame {
+    path,
+    row: row.parse().ok()?,
+    column: column.parse().ok()?,
+    position: open + 1..close,
+  })
+}
 
 /// Rewrites every `at name (file:line:col)` frame to the original `.ts` position.
 ///
@@ -32,19 +63,11 @@ pub fn remap(trace: &str) -> String {
 }
 
 fn remap_frame(line: &str) -> Option<String> {
-  let open = line.find('(')?;
-  let close = line.rfind(')')?;
-  let location = line.get(open + 1..close)?;
+  let frame = frame(line)?;
+  let (row, column) = original_position(Path::new(frame.path), frame.row, frame.column)?;
 
-  // Split from the right: a Windows path carries its own colon in `D:\`.
-  let (rest, column) = location.rsplit_once(':')?;
-  let (path, row) = rest.rsplit_once(':')?;
-  let row: u32 = row.parse().ok()?;
-  let column: u32 = column.parse().ok()?;
-
-  let (source_row, source_column) = original_position(Path::new(path), row, column)?;
-
-  Some(format!("{}({path}:{source_row}:{source_column}){}", &line[..open], &line[close + 1..]))
+  let position = frame.position;
+  Some(format!("{}{}:{row}:{column}{}", &line[..position.start], frame.path, &line[position.end..]))
 }
 
 /// Looks a generated position up in a freshly built map for `path`.

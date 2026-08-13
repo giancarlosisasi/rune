@@ -8,6 +8,7 @@ pub mod envfile;
 pub mod eval;
 pub mod globals;
 pub mod inherit;
+pub mod limits;
 pub mod load;
 pub mod paths;
 pub mod resolve;

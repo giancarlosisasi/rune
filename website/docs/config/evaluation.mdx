@@ -1,6 +1,6 @@
 ---
 title: 'Config evaluation'
-description: 'What a rune.config.ts may import and call, the frozen rune object it imports for the environment, and how the resolved result is cached by import-graph content.'
+description: 'What a rune.config.ts may import, call and await, the rune object it imports for the environment, the time and memory an evaluation may spend, and how the resolved result is cached by import-graph content.'
 ---
 
 # Config evaluation
@@ -151,6 +151,52 @@ Type-only imports from npm packages are fine, because they are erased before any
 ```ts
 import type { Script } from '@gio-labs/rune';
 ```
+
+## Waiting, and how far it goes
+
+`await` and `Promise` work, at the top level of the config and inside any function it calls. A config
+is evaluated to completion before any script starts, so it may await work that finishes on its own:
+
+```ts title="rune.config.ts"
+import { defineConfig } from '@gio-labs/rune';
+import { packages } from './scripts/packages';
+
+const names = await packages();
+
+export default defineConfig({
+  scripts: Object.fromEntries(
+    names.map((name) => [`build:${name}`, { command: `tsc --build packages/${name}` }]),
+  ),
+});
+```
+
+Nothing defers. That is the same rule seen from the other side: a config runs to completion, so work
+handed to `setTimeout`, `setInterval` or `queueMicrotask` would have nowhere to happen — and a `fetch`
+that never settles would leave the config waiting for something that is not coming.
+
+## Time and memory
+
+Evaluating a config is bounded. Past either ceiling Rune stops, names the file it was reading, and
+exits non-zero — rather than sitting at 100% of a core with nothing on screen, or growing until the
+operating system ends the process with an exit code and an empty terminal.
+
+| Ceiling | Default | Raise it with |
+| --- | --- | --- |
+| Time | 5000 ms | `RUNE_CONFIG_TIME_LIMIT_MS` |
+| Memory | 256 MB | `RUNE_CONFIG_MEMORY_LIMIT_MB` |
+
+```
+rune.config.ts did not finish being evaluated within 5000 ms
+
+rune evaluates a config to completion before any script starts, so work that waits or loops without end never finishes and no rune command in this repository can run.
+
+set RUNE_CONFIG_TIME_LIMIT_MS higher for a config that genuinely needs longer.
+```
+
+Both defaults sit far above a real evaluation, which is tens of milliseconds and a few megabytes, so
+only a config that was never going to finish meets one. Both are environment variables rather than
+config fields, because the config is what has not finished being read. Neither ceiling writes a cache
+entry: hitting one says nothing about the config's content.
 
 ## The one package Rune supplies
 

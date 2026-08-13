@@ -4,9 +4,10 @@
 //! TypeScript, hand the JavaScript to QuickJS as a module keyed by its canonical path.
 //! Specifiers are turned into those keys by [`crate::resolve`] and nothing else.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
+use std::time::{Duration, Instant};
 
 use rquickjs::loader::{ImportAttributes, Loader, Resolver};
 use rquickjs::module::Declared;
@@ -16,6 +17,7 @@ use thiserror::Error;
 use crate::builtin;
 use crate::env::{Environment, Observations, ObservedEnvironment};
 use crate::globals::install;
+use crate::limits::{self, Limits};
 use crate::resolve::{ResolveError, canonical, resolve};
 use crate::strip::{StripError, strip_types};
 
@@ -33,8 +35,37 @@ pub enum EvalError {
   #[error("{message}")]
   Runtime { message: String },
 
+  #[error(
+    "{} did not finish being evaluated within {} ms\n\n\
+     rune evaluates a config to completion before any script starts, so work that waits or \
+     loops without end never finishes and no rune command in this repository can run.\n\n\
+     set {} higher for a config that genuinely needs longer.",
+    .path.display(),
+    .limit.as_millis(),
+    limits::TIME_VARIABLE
+  )]
+  TimeLimit { path: PathBuf, limit: Duration },
+
+  #[error(
+    "{} asked for more memory than a config may use while it is evaluated: the limit is {} MB\n\n\
+     rune stops here itself so that the operating system does not stop it instead, which ends \
+     the process with nothing on screen.\n\n\
+     set {} higher for a config that genuinely needs more.",
+    .path.display(),
+    .limit_mb,
+    limits::MEMORY_VARIABLE
+  )]
+  MemoryLimit { path: PathBuf, limit_mb: u64 },
+
   #[error("{}: {message}", .path.display())]
   Shape { path: PathBuf, message: String },
+}
+
+impl EvalError {
+  /// Whether a ceiling stopped the evaluation, rather than anything the config said.
+  fn is_ceiling(&self) -> bool {
+    matches!(self, Self::TimeLimit { .. } | Self::MemoryLimit { .. })
+  }
 }
 
 fn format_strip_errors(errors: &[StripError]) -> String {
@@ -146,14 +177,20 @@ pub fn evaluate_config(entry: &Path, environment: &Environment) -> Result<Evalua
   // runs out. QuickJS unwinds a memory limit as a normal exception instead.
   runtime.set_max_stack_size(STACK_LIMIT);
 
+  let ceilings = Ceilings::new(Limits::from_environment(environment), &entry);
+  runtime.set_memory_limit(ceilings.limits.memory_bytes());
+  runtime.set_interrupt_handler(Some(ceilings.watch()));
+
   let context = Context::full(&runtime).map_err(|error| runtime_error(&error))?;
   let key = entry.to_string_lossy().into_owned();
 
-  context.with(|ctx| {
+  let outcome = context.with(|ctx| {
     install(&ctx, &observed).map_err(|error| runtime_error(&error))?;
 
-    let value = match evaluate_entry(&ctx, &key, code, &entry) {
+    let value = match evaluate_entry(&ctx, &key, code, &entry, &ceilings) {
       Ok(value) => to_json(&value, &entry)?,
+      // A ceiling is why this evaluation ended, whatever it was doing at the time.
+      Err(caught) if caught.is_ceiling() => return Err(caught),
       // The slot holds the real error whenever a loader or resolver rejected the
       // module; the JavaScript exception is only the flattened copy of it.
       Err(caught) => return Err(slot.borrow_mut().take().unwrap_or(caught)),
@@ -164,23 +201,139 @@ pub fn evaluate_config(entry: &Path, environment: &Environment) -> Result<Evalua
     }
 
     Ok(Evaluated { value, observed: observed.observations() })
-  })
+  });
+
+  outcome.map_err(|error| ceilings.or_out_of_memory(&runtime, error))
 }
 
 /// QuickJS unwinds this as a catchable exception, so a cyclic or runaway import graph
 /// surfaces as an error rather than as a stack overflow that takes the process with it.
 const STACK_LIMIT: usize = 1 << 20;
 
+/// The ceilings one evaluation runs under, and what it takes to report meeting one.
+struct Ceilings {
+  limits: Limits,
+  /// Set by the interrupt handler at the moment it decides to stop the engine. The engine
+  /// says only `interrupted`, which is a word about itself; this is what knows rune set a
+  /// deadline and that the deadline is what passed.
+  overran: Rc<Cell<bool>>,
+  /// Set when the engine ended by refusing an allocation. Half of the memory answer, kept
+  /// until the other half can be read.
+  refused: Cell<bool>,
+  /// Where to point when a stack cannot say which file the engine was in.
+  entry: PathBuf,
+}
+
+impl Ceilings {
+  fn new(limits: Limits, entry: &Path) -> Self {
+    Self {
+      limits,
+      overran: Rc::new(Cell::new(false)),
+      refused: Cell::new(false),
+      entry: entry.to_owned(),
+    }
+  }
+
+  /// The handler QuickJS calls while it runs. Once it has stopped the engine it keeps
+  /// saying so, because the unwind is not finished until control comes back to rune.
+  fn watch(&self) -> Box<dyn FnMut() -> bool> {
+    let overran = Rc::clone(&self.overran);
+    let limit = self.limits.time;
+    let started = Instant::now();
+
+    Box::new(move || {
+      if !overran.get() && started.elapsed() >= limit {
+        overran.set(true);
+      }
+
+      overran.get()
+    })
+  }
+
+  /// Records how the engine ended, and answers with the time ceiling when that is what
+  /// ended it.
+  ///
+  /// Memory is not decided here. What the engine threw is only half of that answer, and
+  /// the other half is the runtime's own accounting, which cannot be read while a context
+  /// is open.
+  fn reached(&self, error: &CaughtError<'_>) -> Option<EvalError> {
+    self.refused.set(refused_an_allocation(error));
+
+    self
+      .overran
+      .get()
+      .then(|| EvalError::TimeLimit { path: self.evaluating(error), limit: self.limits.time })
+  }
+
+  /// Names the memory ceiling as the cause when the engine refused an allocation with the
+  /// heap it was given already full.
+  fn or_out_of_memory(&self, runtime: &Runtime, error: EvalError) -> EvalError {
+    if error.is_ceiling() || !self.refused.get() || !heap_is_full(runtime) {
+      return error;
+    }
+
+    EvalError::MemoryLimit { path: self.entry.clone(), limit_mb: self.limits.memory_mb }
+  }
+
+  /// The file the engine was reading when it was stopped.
+  ///
+  /// A loop inside an imported helper is that helper's, and the stack is the only place
+  /// that says so. Frames naming rune's own bootstrap or the module rune supplies point at
+  /// nothing a user can open, so the answer is the first frame that is a file on disk.
+  fn evaluating(&self, error: &CaughtError<'_>) -> PathBuf {
+    let CaughtError::Exception(exception) = error else {
+      return self.entry.clone();
+    };
+
+    exception
+      .stack()
+      .and_then(|stack| stack.lines().find_map(readable_file))
+      .unwrap_or_else(|| self.entry.clone())
+  }
+}
+
+fn readable_file(frame: &str) -> Option<PathBuf> {
+  let path = PathBuf::from(crate::trace::frame(frame)?.path);
+
+  path.is_file().then_some(path)
+}
+
+/// The engine's own marker for an allocation it could not make.
+///
+/// QuickJS throws a bare `null` when it runs out of memory, because building the error
+/// object it would rather throw needs memory of its own. When enough was freed on the way
+/// out it manages the object, and then the failure arrives as an ordinary exception.
+fn refused_an_allocation(error: &CaughtError<'_>) -> bool {
+  match error {
+    CaughtError::Value(value) => value.is_null(),
+    CaughtError::Exception(exception) => exception.message().as_deref() == Some("out of memory"),
+    CaughtError::Error(_) => false,
+  }
+}
+
+/// Whether the heap the engine was given is at least half full.
+///
+/// A config that threw a `null` of its own is the one other thing that looks like the
+/// engine refusing an allocation, and a config that threw has filled nothing: a runtime
+/// with the whole config graph loaded holds about a megabyte.
+fn heap_is_full(runtime: &Runtime) -> bool {
+  let usage = runtime.memory_usage();
+
+  usage.malloc_size.saturating_mul(2) >= usage.malloc_limit
+}
+
 fn evaluate_entry<'js>(
   ctx: &Ctx<'js>,
   key: &str,
   code: String,
   entry: &Path,
+  ceilings: &Ceilings,
 ) -> Result<Value<'js>, EvalError> {
-  let declared =
-    Module::declare(ctx.clone(), key, code).catch(ctx).map_err(|error| caught_error(&error))?;
-  let (module, promise) = declared.eval().catch(ctx).map_err(|error| caught_error(&error))?;
-  promise.finish::<()>().catch(ctx).map_err(|error| caught_error(&error))?;
+  let caught = |error: &CaughtError<'_>| caught_error(error, ceilings);
+
+  let declared = Module::declare(ctx.clone(), key, code).catch(ctx).map_err(|e| caught(&e))?;
+  let (module, promise) = declared.eval().catch(ctx).map_err(|e| caught(&e))?;
+  promise.finish::<()>().catch(ctx).map_err(|e| caught(&e))?;
 
   // A module that exports no `default` has nothing else this could be, so the generic
   // engine error is replaced by the one thing the user needs to be told.
@@ -202,9 +355,11 @@ fn missing_default_export(entry: &Path) -> EvalError {
   }
 }
 
-fn caught_error(error: &CaughtError<'_>) -> EvalError {
-  // The engine reports positions in generated JavaScript. The user wrote TypeScript.
-  EvalError::Runtime { message: crate::trace::remap(&error.to_string()) }
+fn caught_error(error: &CaughtError<'_>, ceilings: &Ceilings) -> EvalError {
+  ceilings.reached(error).unwrap_or_else(|| {
+    // The engine reports positions in generated JavaScript. The user wrote TypeScript.
+    EvalError::Runtime { message: crate::trace::remap(&error.to_string()) }
+  })
 }
 
 fn runtime_error(error: &rquickjs::Error) -> EvalError {

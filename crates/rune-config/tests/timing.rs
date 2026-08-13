@@ -1,9 +1,14 @@
-//! Gate G4 — recorded, not gating. The real benchmark gate lands with the release
+//! Recorded, not gating. The benchmark that gates a release lives in the release
 //! pipeline; this exists so a change that makes loading ten times slower is noticed.
 //!
 //! Thresholds are deliberately far above the budget (cold < 30 ms, warm < 2 ms) because
 //! a shared CI runner is not a quiet machine. The measured numbers are written to
 //! `target/g4-timings.txt` for the record.
+//!
+//! Test R25.9 — a cold load is what pays for the ceilings on evaluation: the memory limit
+//! is set once, and the interrupt handler reads a clock and compares, periodically, for as
+//! long as the config is being evaluated. This is where a mechanism that started costing
+//! more than that would show.
 
 use std::fs;
 use std::time::{Duration, Instant};

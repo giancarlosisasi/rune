@@ -1,0 +1,10 @@
+---
+source: crates/rune-cli/tests/limits.rs
+description: a config holding a loop that never ends
+expression: "redact(test.dir(), &stderr_of(&output))"
+---
+[TMP]/rune.config.ts did not finish being evaluated within 250 ms
+
+rune evaluates a config to completion before any script starts, so work that waits or loops without end never finishes and no rune command in this repository can run.
+
+set RUNE_CONFIG_TIME_LIMIT_MS higher for a config that genuinely needs longer.
